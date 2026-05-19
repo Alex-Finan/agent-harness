@@ -1,7 +1,10 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { createRequire } from 'node:module';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { writeAtomic, ensureDir } from '../lib/fs.js';
+
+const _require = createRequire(import.meta.url);
 
 export interface RunSessionInput {
   prompt: string;
@@ -26,16 +29,11 @@ export interface RunSessionResult {
 
 /**
  * Resolve the path to the SDK's bundled cli.js.
- * Anchors the require context to the project root (process.cwd()) so that
- * the SDK package is found regardless of this file's location.
+ * Anchors resolution to this file's location via createRequire(import.meta.url),
+ * so the SDK package is found regardless of where the CLI is invoked from.
  */
 function resolveCliPath(): string {
-  // Use dynamic require from cwd — works in both real runtime and jest mocked tests
-  // (this function is never called when query() is mocked).
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { createRequire } = require('node:module') as typeof import('node:module');
-  const req = createRequire(path.join(process.cwd(), 'package.json'));
-  const sdkMain = req.resolve('@anthropic-ai/claude-agent-sdk');
+  const sdkMain = _require.resolve('@anthropic-ai/claude-agent-sdk');
   return path.join(path.dirname(sdkMain), 'cli.js');
 }
 

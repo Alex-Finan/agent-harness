@@ -1,24 +1,6 @@
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { RunSessionInput } from '../sdk/session.js';
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-declare const __dirname: string | undefined;
-
-function resolvePromptsDir(): string {
-  if (typeof __dirname !== 'undefined') {
-    return path.join(__dirname as string, '..', 'prompts');
-  }
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { createRequire } = require('node:module') as typeof import('node:module');
-  const req = createRequire(path.join(process.cwd(), 'package.json'));
-  const selfResolved = req.resolve('./dist/roles/evaluator');
-  return path.join(path.dirname(selfResolved), '..', 'prompts');
-}
-
-async function loadPrompt(name: string): Promise<string> {
-  return fs.readFile(path.join(resolvePromptsDir(), name), 'utf8');
-}
+import { loadPrompt } from './prompts.js';
 
 export interface EvaluatorArgs {
   runId: string;

@@ -1,29 +1,31 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { jest } from '@jest/globals';
 
-jest.mock('../../src/sdk/session.js', () => ({
-  runSession: jest.fn()
+// In native ESM mode, use unstable_mockModule + dynamic import.
+const mockRunSession = jest.fn();
+jest.unstable_mockModule('../../src/sdk/session.js', () => ({
+  runSession: mockRunSession
 }));
-import { runSession } from '../../src/sdk/session.js';
-import { handleInit } from '../../src/cli/commands/init.js';
-import { handlePlan } from '../../src/cli/commands/plan.js';
-import { handleNext } from '../../src/cli/commands/next.js';
-import { loadRun } from '../../src/state/run.js';
 
-const mockedRun = runSession as unknown as jest.Mock;
+const { handleInit } = await import('../../src/cli/commands/init.js');
+const { handlePlan } = await import('../../src/cli/commands/plan.js');
+const { handleNext } = await import('../../src/cli/commands/next.js');
+const { loadRun } = await import('../../src/state/run.js');
 
 async function seedWithPlan(tmp: string): Promise<string> {
   process.env.AGENT_HARNESS_HOME = tmp;
   const { runId } = await handleInit({ repo: tmp, task: 't', maxRetries: 3 });
-  mockedRun.mockImplementationOnce(async (cfg: { cwd: string }) => {
+  mockRunSession.mockImplementationOnce(async (cfg: unknown) => {
+    const c = cfg as { cwd: string };
     await fs.writeFile(
-      path.join(cfg.cwd, 'plan.md'),
+      path.join(c.cwd, 'plan.md'),
       `# Plan\n## Sprint 1: First sprint\n`
     );
-    await fs.mkdir(path.join(cfg.cwd, 'sprints', '01-first-sprint'), { recursive: true });
+    await fs.mkdir(path.join(c.cwd, 'sprints', '01-first-sprint'), { recursive: true });
     await fs.writeFile(
-      path.join(cfg.cwd, 'sprints', '01-first-sprint', 'contract.md'),
+      path.join(c.cwd, 'sprints', '01-first-sprint', 'contract.md'),
       `# Sprint 1 — first sprint\n## Rubric\n1. always pass\n`
     );
     return { success: true, durationMs: 1, resultText: 'done' };
@@ -40,13 +42,13 @@ describe('harness next', () => {
   afterEach(async () => {
     delete process.env.AGENT_HARNESS_HOME;
     await fs.rm(tmp, { recursive: true, force: true });
-    mockedRun.mockReset();
+    mockRunSession.mockReset();
   });
 
   test('next executor writes output.md and advances to evaluator', async () => {
     const runId = await seedWithPlan(tmp);
-    mockedRun.mockImplementationOnce(async (cfg: { prompt: string }) => {
-      const outPath = cfg.prompt.match(/Write your output summary to: (\S+)/)?.[1];
+    mockRunSession.mockImplementationOnce(async (cfg: unknown) => {
+      const outPath = (cfg as { prompt: string }).prompt.match(/Write your output summary to: (\S+)/)?.[1];
       if (outPath) await fs.writeFile(outPath, 'work done');
       return { success: true, durationMs: 1 };
     });
@@ -59,15 +61,15 @@ describe('harness next', () => {
   test('next evaluator with PASS advances sprint', async () => {
     const runId = await seedWithPlan(tmp);
 
-    mockedRun.mockImplementationOnce(async (cfg: { prompt: string }) => {
-      const outPath = cfg.prompt.match(/Write your output summary to: (\S+)/)?.[1];
+    mockRunSession.mockImplementationOnce(async (cfg: unknown) => {
+      const outPath = (cfg as { prompt: string }).prompt.match(/Write your output summary to: (\S+)/)?.[1];
       if (outPath) await fs.writeFile(outPath, 'work done');
       return { success: true, durationMs: 1 };
     });
     await handleNext({ runId });
 
-    mockedRun.mockImplementationOnce(async (cfg: { prompt: string }) => {
-      const verdictPath = cfg.prompt.match(/Write your verdict to: (\S+)/)?.[1];
+    mockRunSession.mockImplementationOnce(async (cfg: unknown) => {
+      const verdictPath = (cfg as { prompt: string }).prompt.match(/Write your verdict to: (\S+)/)?.[1];
       if (verdictPath) {
         await fs.writeFile(
           verdictPath,
@@ -87,15 +89,15 @@ describe('harness next', () => {
   test('next evaluator with FAIL stays in sprint, retry++', async () => {
     const runId = await seedWithPlan(tmp);
 
-    mockedRun.mockImplementationOnce(async (cfg: { prompt: string }) => {
-      const outPath = cfg.prompt.match(/Write your output summary to: (\S+)/)?.[1];
+    mockRunSession.mockImplementationOnce(async (cfg: unknown) => {
+      const outPath = (cfg as { prompt: string }).prompt.match(/Write your output summary to: (\S+)/)?.[1];
       if (outPath) await fs.writeFile(outPath, 'work done');
       return { success: true, durationMs: 1 };
     });
     await handleNext({ runId });
 
-    mockedRun.mockImplementationOnce(async (cfg: { prompt: string }) => {
-      const verdictPath = cfg.prompt.match(/Write your verdict to: (\S+)/)?.[1];
+    mockRunSession.mockImplementationOnce(async (cfg: unknown) => {
+      const verdictPath = (cfg as { prompt: string }).prompt.match(/Write your verdict to: (\S+)/)?.[1];
       if (verdictPath) {
         await fs.writeFile(
           verdictPath,

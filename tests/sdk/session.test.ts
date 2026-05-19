@@ -1,15 +1,16 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { jest } from '@jest/globals';
 
-// Mock the SDK before importing the wrapper.
-jest.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  query: jest.fn()
+// In native ESM mode, jest.mock() hoisting doesn't intercept ESM imports.
+// We use unstable_mockModule + dynamic import instead.
+const mockQuery = jest.fn();
+jest.unstable_mockModule('@anthropic-ai/claude-agent-sdk', () => ({
+  query: mockQuery
 }));
-import { query } from '@anthropic-ai/claude-agent-sdk';
-import { runSession } from '../../src/sdk/session.js';
 
-const mockedQuery = query as unknown as jest.Mock;
+const { runSession } = await import('../../src/sdk/session.js');
 
 async function* fakeStream(messages: unknown[]): AsyncIterable<unknown> {
   for (const m of messages) yield m;
@@ -22,11 +23,11 @@ describe('runSession', () => {
   });
   afterEach(async () => {
     await fs.rm(tmp, { recursive: true, force: true });
-    mockedQuery.mockReset();
+    mockQuery.mockReset();
   });
 
   test('streams messages, writes transcript, returns final text', async () => {
-    mockedQuery.mockReturnValue(
+    mockQuery.mockReturnValue(
       fakeStream([
         { type: 'assistant', content: [{ type: 'text', text: 'thinking...' }] },
         { type: 'result', subtype: 'success', result: 'done', total_cost_usd: 0.01 }
@@ -52,7 +53,7 @@ describe('runSession', () => {
   });
 
   test('returns success=false when subtype is not success', async () => {
-    mockedQuery.mockReturnValue(
+    mockQuery.mockReturnValue(
       fakeStream([{ type: 'result', subtype: 'error_max_turns' }])
     );
 
