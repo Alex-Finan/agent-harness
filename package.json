@@ -7,9 +7,9 @@
   "bin": {
     "harness": "./bin/harness"
   },
-  "main": "dist/src/index.js",
+  "main": "dist/index.js",
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.json && cp -r src/prompts dist/src/prompts",
+    "build": "rm -rf dist && tsc -p tsconfig.json && (cp -r src/prompts dist/prompts 2>/dev/null || true)",
     "dev": "tsc --watch",
     "test": "jest --passWithNoTests",
     "lint": "tsc -p tsconfig.json --noEmit",
