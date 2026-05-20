@@ -26,7 +26,10 @@ export const StateSchema = z.object({
   origin_repo: z.string().optional(),
   worktree_path: z.string().optional(),
   branch: z.string().optional(),
-  base_branch: z.string().optional()
+  base_branch: z.string().optional(),
+  // When true the server should resume the auto-iterate loop after restart.
+  // Defaults to false so old state.json files without this key parse cleanly.
+  auto_iterate: z.boolean().default(false)
 });
 
 export type State = z.infer<typeof StateSchema>;

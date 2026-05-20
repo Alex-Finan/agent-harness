@@ -12,7 +12,8 @@ const base: State = {
   max_retries: 3,
   status: 'in_progress',
   created_at: 'now',
-  updated_at: 'now'
+  updated_at: 'now',
+  auto_iterate: false
 };
 
 describe('advance', () => {
