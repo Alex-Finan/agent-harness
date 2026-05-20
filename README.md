@@ -132,3 +132,30 @@ runs/<run_id>/
 
 worktrees/<run_id>/      git worktree, only present when run was created with --base
 ```
+
+## Use from Claude Code
+
+The harness ships an MCP server that exposes all harness operations as Claude Code tools. Once wired up, you can drive the entire planner → executor → evaluator loop from a Claude Code conversation — listing runs, inspecting state, kicking off new runs, editing plans and contracts, and tailing logs — without shell-outs or HTTP calls.
+
+Add the following to `~/.claude.json` (under `mcpServers`):
+
+```json
+{
+  "mcpServers": {
+    "harness": {
+      "command": "/Users/<user>/Developer/agent-harness/bin/harness",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Replace `/Users/<user>/Developer/agent-harness` with the absolute path to your local clone.
+
+### Example Claude Code prompts
+
+- "List my active harness runs and show the current sprint status for each."
+- "Kick off a harness run on ~/Developer/my-project to add a dark mode toggle to the settings page."
+- "Show me the verdict of sprint 2 on run 2026-05-20-143000-abc123 — did it pass or fail?"
+- "Save this revised plan to run 2026-05-20-143000-abc123 and update the sprint count."
+- "Abort the stalled run 2026-05-19-090000-deadbeef and purge its worktree."
