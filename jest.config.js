@@ -8,6 +8,6 @@ export default {
   },
   testMatch: ['<rootDir>/tests/**/*.test.ts'],
   transform: {
-    '^.+\\.ts$': ['ts-jest', { useESM: true, tsconfig: { module: 'NodeNext' } }]
+    '^.+\\.ts$': ['ts-jest', { useESM: true, tsconfig: { module: 'NodeNext', isolatedModules: true } }]
   }
 };

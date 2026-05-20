@@ -46,6 +46,7 @@ export async function createRun(input: CreateRunInput): Promise<Run> {
     status: 'in_progress',
     created_at: now,
     updated_at: now,
+    auto_iterate: false,
     ...input.extraState
   };
 

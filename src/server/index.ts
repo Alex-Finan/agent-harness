@@ -2,6 +2,9 @@ import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { buildServer } from './api.js';
+import type { RunDispatcher } from './dispatch.js';
+import { runsRoot, statePath } from '../state/paths.js';
+import { StateSchema } from '../state/schema.js';
 
 export interface ServeOptions {
   port?: number;
@@ -35,6 +38,58 @@ function defaultWebDist(): string | undefined {
   return undefined;
 }
 
+/**
+ * Scan all runs at server boot and restart any auto-iterate loop that was
+ * in-flight when the server last stopped. Fires and forgets each restart so
+ * the server is never delayed from accepting HTTP requests.
+ */
+export async function resumeAutoIterates(dispatcher: RunDispatcher): Promise<void> {
+  const entries = await fs.readdir(runsRoot(), { withFileTypes: true }).catch(() => null);
+  if (entries === null) {
+    // runsRoot doesn't exist yet — nothing to resume
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const runId = entry.name;
+
+    let raw: string;
+    try {
+      raw = await fs.readFile(statePath(runId), 'utf8');
+    } catch {
+      continue;
+    }
+
+    let parseResult: ReturnType<typeof StateSchema.safeParse>;
+    try {
+      parseResult = StateSchema.safeParse(JSON.parse(raw));
+    } catch {
+      // eslint-disable-next-line no-console
+      console.warn(`[resume] skipping ${runId}: could not parse state.json`);
+      continue;
+    }
+
+    if (!parseResult.success) {
+      // eslint-disable-next-line no-console
+      console.warn(`[resume] skipping ${runId}: state.json does not match schema`);
+      continue;
+    }
+
+    const s = parseResult.data;
+    if (s.auto_iterate && s.status === 'in_progress' && s.next_role !== 'done') {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[resume] run ${runId} resuming auto-iterate at sprint ${s.current_sprint}, next=${s.next_role}`
+      );
+      dispatcher.startAutoIterate(runId).catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.warn(`[resume] auto-iterate for ${runId} failed:`, err);
+      });
+    }
+  }
+}
+
 export async function serve(opts: ServeOptions = {}): Promise<{
   url: string;
   close: () => Promise<void>;
@@ -49,8 +104,9 @@ export async function serve(opts: ServeOptions = {}): Promise<{
     });
   }
 
-  const { app, watcher } = await buildServer({ webDist, logger: false });
+  const { app, watcher, dispatcher } = await buildServer({ webDist, logger: false });
   await app.listen({ port, host });
+  void resumeAutoIterates(dispatcher);
   const url = `http://${host}:${port}`;
   // eslint-disable-next-line no-console
   console.log(`agent-harness UI listening at ${url}`);

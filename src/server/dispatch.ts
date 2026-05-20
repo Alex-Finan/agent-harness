@@ -2,7 +2,7 @@ import { handlePlan, handlePlanRevise } from '../cli/commands/plan.js';
 import { handleNext } from '../cli/commands/next.js';
 import { handleInit, type InitArgs, type InitResult } from '../cli/commands/init.js';
 import { handleAbort } from '../cli/commands/abort.js';
-import { loadRun } from '../state/run.js';
+import { loadRun, saveState } from '../state/run.js';
 import { EventBus } from './events.js';
 
 export interface DispatchHandle {
@@ -52,17 +52,40 @@ export class RunDispatcher {
    */
   async startAutoIterate(runId: string): Promise<DispatchHandle> {
     return this.start(runId, 'next', async () => {
-      // Bounded ceiling so a misbehaving planner can't pin a CPU forever.
-      for (let i = 0; i < 200; i++) {
-        const run = await loadRun(runId);
-        const s = run.state;
-        if (s.status !== 'in_progress') return;
-        if (s.next_role === 'planner') {
-          await handlePlan({ runId });
-          continue;
+      // Persist intent so a server restart can resume this loop.
+      const preLoop = await loadRun(runId);
+      await saveState({
+        ...preLoop.state,
+        auto_iterate: true,
+        updated_at: new Date().toISOString()
+      });
+
+      try {
+        // Bounded ceiling so a misbehaving planner can't pin a CPU forever.
+        for (let i = 0; i < 200; i++) {
+          const run = await loadRun(runId);
+          const s = run.state;
+          if (s.status !== 'in_progress') return;
+          if (s.next_role === 'planner') {
+            await handlePlan({ runId });
+            continue;
+          }
+          if (s.next_role === 'done') return;
+          await handleNext({ runId });
         }
-        if (s.next_role === 'done') return;
-        await handleNext({ runId });
+      } finally {
+        // Clear the flag on every exit path: normal completion, status change,
+        // ceiling hit, or unexpected exception.
+        try {
+          const run = await loadRun(runId);
+          await saveState({
+            ...run.state,
+            auto_iterate: false,
+            updated_at: new Date().toISOString()
+          });
+        } catch {
+          /* best-effort: if the run was purged we can't clear the flag */
+        }
       }
     });
   }
@@ -107,6 +130,21 @@ export class RunDispatcher {
   }
 
   async abort(runId: string): Promise<{ purged: boolean }> {
+    // Clear auto_iterate flag before delegating. This prevents a race where
+    // the server is killed after abort() writes status:aborted but the loop's
+    // finally block never ran.
+    try {
+      const run = await loadRun(runId);
+      if (run.state.auto_iterate) {
+        await saveState({
+          ...run.state,
+          auto_iterate: false,
+          updated_at: new Date().toISOString()
+        });
+      }
+    } catch {
+      /* run may not exist — handleAbort will surface the error */
+    }
     return handleAbort({ runId });
   }
 }
