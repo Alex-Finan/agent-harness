@@ -76,10 +76,15 @@ export interface RunDetail {
 export type PromptName = 'planner' | 'executor' | 'evaluator';
 
 async function http<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
-    ...init
-  });
+  // Only declare a JSON content-type when we're actually sending a JSON body.
+  // Fastify's strict JSON parser 400s with FST_ERR_CTP_EMPTY_JSON_BODY when
+  // a request advertises application/json but has no body, which broke every
+  // bodyless POST action button (start/next/auto/abort).
+  const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
+  if (init?.body != null && headers['Content-Type'] == null) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const res = await fetch(url, { ...init, headers });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`${res.status} ${res.statusText}: ${text}`);
