@@ -21,38 +21,73 @@ ln -sf "$PWD/bin/harness" /usr/local/bin/harness    # optional
 
 Set `ANTHROPIC_API_KEY` in your env.
 
-## Quickstart
+## Mental model: run vs sprint vs PR
+
+| | What it is | Maps to |
+|---|---|---|
+| **Sprint** | One executor → evaluator loop. Has a contract, a rubric, and verification commands. All sprints in a run land on **the same branch**. | A checkpoint inside one PR |
+| **Run** | One `harness init`. One branch. Contains 1+ sprints. | One pull request |
+| **Stack** | Several runs whose branches are based on each other. | Several stacked PRs |
+
+A sprint is **never** its own PR. Sprints are the planner's way of breaking *one PR's worth of work* into checkpointable pieces. PR boundaries are your call — the planner explicitly flags when a task is too big for one PR and recommends a split.
+
+## Quickstart — stacked PR workflow
 
 ```bash
-# 1. Start a run
-RUN=$(harness init --repo ~/Developer/payabli-datalake --task "Add silver/vendor_address_clusters.py per RFC-004")
-echo "$RUN"
+ORIGIN=~/Developer/payabli-datalake
 
-# 2. Plan
-harness plan --run "$RUN"
+# PR #1 — bottom of the stack, branches off develop
+R1=$(harness init --repo "$ORIGIN" --base develop \
+        --branch feat/payout-bronze --task-file sprint1.md)
 
-# 3. Walk through sprints
-harness next --run "$RUN"     # invokes executor
-harness next --run "$RUN"     # invokes evaluator
-# repeat until status == completed (or halted)
+harness plan --run "$R1"
+harness next --run "$R1"     # executor
+harness next --run "$R1"     # evaluator
+# repeat until status == completed
 
-# Inspect
-harness status --run "$RUN"
-harness logs --run "$RUN"
+# Push and open PR #1
+cd ~/.agent-harness/worktrees/$R1
+gt submit --stack            # or: git push -u origin HEAD && gh pr create
+
+# PR #2 — stacked on PR #1's branch
+R2=$(harness init --repo "$ORIGIN" --base feat/payout-bronze \
+        --branch feat/payout-silver --task-file sprint2.md)
+
+# PR #3 — stacked on PR #2's branch
+R3=$(harness init --repo "$ORIGIN" --base feat/payout-silver \
+        --branch feat/payout-gold --task-file sprint3.md)
+```
+
+When PR #1 merges into `develop`, run `gt sync` (or `git rebase`) from inside the run 2 worktree to restack the rest.
+
+After a PR merges, close out the run and reclaim the worktree:
+
+```bash
+harness finish --run "$R1" --purge
+```
+
+## Legacy single-checkout mode
+
+`harness init` without `--base` writes directly into the target repo on whatever branch is checked out — same behavior as before this feature. Useful for quick experiments where you don't care about stacking.
+
+```bash
+harness init --repo ~/Developer/some-repo --task "fix the bug"
 ```
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
-| `harness init` | Create a run |
+| `harness init --repo … --base <branch>` | Create a run in a new worktree branched off `<branch>` |
+| `harness init --repo …` *(no --base)* | Create a run that writes directly into the target repo |
 | `harness plan` | Invoke the planner |
 | `harness next` | Invoke whichever role is next (executor or evaluator) |
 | `harness status` | Print state.json |
 | `harness logs` | Tail SDK transcripts |
 | `harness list` | List all runs |
 | `harness retry` | Bump current role to re-run |
-| `harness abort` | Mark run aborted |
+| `harness finish [--purge]` | Mark a run completed; optionally remove the worktree |
+| `harness abort [--purge]` | Mark a run aborted; optionally remove the worktree |
 
 See `docs/superpowers/specs/2026-05-19-agent-harness-design.md` for the full design.
 
@@ -62,10 +97,12 @@ See `docs/superpowers/specs/2026-05-19-agent-harness-design.md` for the full des
 runs/<run_id>/
 ├── task.md
 ├── plan.md
-├── state.json
+├── state.json           run metadata; includes worktree fields when --base was used
 ├── sprints/01-<slug>/
 │   ├── contract.md      planner-written: scope + rubric + verification cmds
 │   ├── output.md        executor's summary
 │   └── verdict.md       evaluator's PASS|FAIL + reasoning
 └── logs/                per-role SDK transcripts (JSONL)
+
+worktrees/<run_id>/      git worktree, only present when run was created with --base
 ```
