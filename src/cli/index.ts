@@ -18,6 +18,7 @@ export async function main(argv: string[]): Promise<void> {
   const { registerAbort } = await import('./commands/abort.js');
   const { registerFinish } = await import('./commands/finish.js');
   const { registerServe } = await import('./commands/serve.js');
+  const { registerMcp } = await import('./commands/mcp.js');
 
   registerInit(program);
   registerPlan(program);
@@ -29,6 +30,7 @@ export async function main(argv: string[]): Promise<void> {
   registerAbort(program);
   registerFinish(program);
   registerServe(program);
+  registerMcp(program);
 
   await program.parseAsync(argv);
 }
