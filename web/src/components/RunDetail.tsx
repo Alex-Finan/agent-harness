@@ -12,15 +12,23 @@ import { PlanEditor } from './PlanEditor';
 import { SprintTimeline } from './SprintTimeline';
 import { TranscriptStream } from './TranscriptStream';
 import { CostPanel } from './CostPanel';
-import { Markdown } from './Markdown';
+import { PlanChat } from './PlanChat';
 import { formatCost, formatRelative } from '../lib/format';
 
-type Tab = 'overview' | 'plan' | 'sprints' | 'transcripts' | 'cost' | 'task';
+/**
+ * A run is in the "planning phase" until any sprint produces output.md.
+ * During this window the operator iterates on plan.md with the planner;
+ * the sprint timeline and other run-time panels stay hidden.
+ */
+function isPlanningPhase(detail: RunDetailT): boolean {
+  const sprints = detail.snapshot.sprints;
+  const anySprintRan = sprints.some((s) => s.outputMd !== null || s.verdictMd !== null);
+  return !anySprintRan;
+}
 
 export function RunDetail({ runId }: { runId: string }) {
   const [detail, setDetail] = useState<RunDetailT | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>('overview');
   const [appendByLog, setAppendByLog] = useState<Record<string, TranscriptMessage[]>>({});
   const [resetTick, setResetTick] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
@@ -250,52 +258,76 @@ export function RunDetail({ runId }: { runId: string }) {
           </div>
         </div>
       </header>
-      <nav className="flex gap-1 border-b border-slate-800 px-4">
-        {(['overview', 'plan', 'sprints', 'transcripts', 'cost', 'task'] as Tab[]).map((t) => (
-          <button
-            key={t}
-            className={`px-3 py-2 text-sm ${
-              tab === t ? 'border-b-2 border-emerald-500 text-emerald-400' : 'text-slate-400 hover:text-slate-100'
-            }`}
-            onClick={() => setTab(t)}
-          >
-            {t}
-          </button>
-        ))}
-      </nav>
       <div className="flex-1 overflow-y-auto p-4">
-        {tab === 'overview' ? <Overview detail={detail} /> : null}
-        {tab === 'plan' ? (
-          <PlanEditor runId={runId} planMd={detail.snapshot.planMd} />
-        ) : null}
-        {tab === 'sprints' ? <SprintTimeline detail={detail} /> : null}
-        {tab === 'transcripts' ? (
-          <div className="h-[calc(100vh-220px)]">
+        {isPlanningPhase(detail) ? (
+          <PlanningView
+            detail={detail}
+            appendByLog={appendByLog}
+            resetTick={resetTick}
+          />
+        ) : (
+          <SprintView
+            detail={detail}
+            appendByLog={appendByLog}
+            resetTick={resetTick}
+          />
+        )}
+      </div>
+      {sprintRows.length > 0 ? null : null}
+    </div>
+  );
+}
+
+function PlanningView({
+  detail,
+  appendByLog,
+  resetTick
+}: {
+  detail: RunDetailT;
+  appendByLog: Record<string, TranscriptMessage[]>;
+  resetTick: Record<string, number>;
+}) {
+  const dispatchingActive = !!(detail.dispatching && !detail.dispatching.finished);
+  const planMd = detail.snapshot.planMd;
+  const showTranscript = dispatchingActive && detail.snapshot.logFiles.length > 0;
+
+  return (
+    <div className="grid h-full grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
+      <div className="min-h-[60vh]">
+        <PlanEditor runId={detail.state.run_id} planMd={planMd} />
+      </div>
+      <div className="flex min-h-[60vh] flex-col gap-4">
+        <div className="min-h-[40vh] flex-1">
+          <PlanChat
+            runId={detail.state.run_id}
+            busy={dispatchingActive}
+            disabled={planMd === null}
+          />
+        </div>
+        {showTranscript ? (
+          <div className="h-[30vh]">
             <TranscriptStream
-              runId={runId}
+              runId={detail.state.run_id}
               logFiles={detail.snapshot.logFiles}
               appendByLog={appendByLog}
               resetTick={resetTick}
             />
           </div>
         ) : null}
-        {tab === 'cost' ? <CostPanel cost={detail.cost} /> : null}
-        {tab === 'task' ? (
-          <div className="panel max-h-[70vh] overflow-y-auto px-4 py-3">
-            {detail.snapshot.taskMd ? (
-              <Markdown source={detail.snapshot.taskMd} />
-            ) : (
-              <div className="text-sm text-slate-500">No task.md.</div>
-            )}
-          </div>
-        ) : null}
       </div>
-      {sprintRows.length > 0 && tab === 'overview' ? null : null}
     </div>
   );
 }
 
-function Overview({ detail }: { detail: RunDetailT }) {
+function SprintView({
+  detail,
+  appendByLog,
+  resetTick
+}: {
+  detail: RunDetailT;
+  appendByLog: Record<string, TranscriptMessage[]>;
+  resetTick: Record<string, number>;
+}) {
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
       <SprintTimeline detail={detail} />
@@ -303,8 +335,8 @@ function Overview({ detail }: { detail: RunDetailT }) {
         <TranscriptStream
           runId={detail.state.run_id}
           logFiles={detail.snapshot.logFiles}
-          appendByLog={{}}
-          resetTick={{}}
+          appendByLog={appendByLog}
+          resetTick={resetTick}
         />
       </div>
       <PlanEditor runId={detail.state.run_id} planMd={detail.snapshot.planMd} />

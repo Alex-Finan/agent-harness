@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
+import { RepoPicker } from './RepoPicker';
 
 export function NewRunDialog({
   onClose,
@@ -55,14 +56,11 @@ export function NewRunDialog({
         </div>
         <form onSubmit={submit} className="space-y-3 px-5 py-4">
           <div>
-            <label className="label">Target repository (absolute path)</label>
-            <input
-              className="input"
-              value={repo}
-              onChange={(e) => setRepo(e.target.value)}
-              placeholder="/Users/alex/Developer/payabli-datalake"
-              required
-            />
+            <label className="label">Target repository</label>
+            <RepoPicker value={repo} onChange={setRepo} disabled={busy} />
+            <div className="mt-1 text-[11px] text-slate-500">
+              Pick from your GitHub repos + local clones, or paste an absolute path directly.
+            </div>
           </div>
           <div>
             <label className="label">Task description</label>

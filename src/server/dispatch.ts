@@ -1,4 +1,4 @@
-import { handlePlan } from '../cli/commands/plan.js';
+import { handlePlan, handlePlanRevise } from '../cli/commands/plan.js';
 import { handleNext } from '../cli/commands/next.js';
 import { handleInit, type InitArgs, type InitResult } from '../cli/commands/init.js';
 import { handleAbort } from '../cli/commands/abort.js';
@@ -39,6 +39,10 @@ export class RunDispatcher {
 
   async startNext(runId: string): Promise<DispatchHandle> {
     return this.start(runId, 'next', () => handleNext({ runId }));
+  }
+
+  async startPlanRevise(runId: string, revisionMessage: string): Promise<DispatchHandle> {
+    return this.start(runId, 'planner', () => handlePlanRevise({ runId, revisionMessage }));
   }
 
   /**

@@ -116,6 +116,12 @@ export const api = {
 
   abort: (id: string) => http<{ ok: boolean }>(`/api/runs/${id}/abort`, { method: 'POST' }),
 
+  revisePlan: (id: string, message: string) =>
+    http<{ runId: string; role: string; startedAt: string }>(`/api/runs/${id}/plan/revise`, {
+      method: 'POST',
+      body: JSON.stringify({ message })
+    }),
+
   savePlan: (id: string, planMd: string) =>
     http<{ ok: boolean; sprints: number }>(`/api/runs/${id}/plan`, {
       method: 'PUT',
@@ -139,8 +145,25 @@ export const api = {
     http<{ ok: boolean }>(`/api/prompts/${name}`, {
       method: 'PUT',
       body: JSON.stringify({ content })
-    })
+    }),
+
+  listRepos: (opts: { refresh?: boolean } = {}) =>
+    http<RepoListResult>(`/api/repos${opts.refresh ? '?refresh=1' : ''}`)
 };
+
+export interface Repo {
+  slug: string;
+  description: string | null;
+  localPath: string | null;
+  source: 'gh' | 'local-only';
+}
+
+export interface RepoListResult {
+  repos: Repo[];
+  cachedAt: string;
+  ghAvailable: boolean;
+  searchRoots: string[];
+}
 
 export type TranscriptMessage =
   | { type: 'system'; subtype?: string; [k: string]: unknown }

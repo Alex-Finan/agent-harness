@@ -14,6 +14,7 @@ import { computeRunCost } from './cost.js';
 import { EventBus } from './events.js';
 import { HarnessWatcher } from './watcher.js';
 import { RunDispatcher } from './dispatch.js';
+import { listRepos } from './repos.js';
 
 export interface BuildServerOptions {
   webDist?: string;
@@ -30,6 +31,10 @@ const InitBody = z.object({
 
 const PlanBody = z.object({
   planMd: z.string().min(1)
+});
+
+const PlanReviseBody = z.object({
+  message: z.string().min(1)
 });
 
 const ContractBody = z.object({
@@ -142,6 +147,21 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
     return { runId: id, role: handle.role, startedAt: handle.startedAt };
   });
 
+  app.post('/api/runs/:id/plan/revise', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const parsed = PlanReviseBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid body', issues: parsed.error.issues };
+    }
+    if (dispatcher.isBusy(id)) {
+      reply.code(409);
+      return { error: 'run already has an in-flight role' };
+    }
+    const handle = await dispatcher.startPlanRevise(id, parsed.data.message);
+    return { runId: id, role: handle.role, startedAt: handle.startedAt };
+  });
+
   app.post('/api/runs/:id/auto', async (req, reply) => {
     const { id } = req.params as { id: string };
     if (dispatcher.isBusy(id)) {
@@ -239,6 +259,12 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
     }
     await writePrompt(name, parsed.data.content);
     return { ok: true };
+  });
+
+  // -------------------- Repos --------------------
+  app.get('/api/repos', async (req) => {
+    const { refresh } = (req.query as { refresh?: string }) ?? {};
+    return listRepos({ force: refresh === '1' || refresh === 'true' });
   });
 
   // -------------------- SSE --------------------

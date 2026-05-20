@@ -41,6 +41,52 @@ export async function handlePlan(args: { runId: string }): Promise<void> {
   await saveState(nextState);
 }
 
+export async function handlePlanRevise(args: {
+  runId: string;
+  revisionMessage: string;
+}): Promise<void> {
+  const run = await loadRun(args.runId);
+  if (run.state.status !== 'in_progress') {
+    throw new Error(`Cannot revise plan: run status is ${run.state.status}`);
+  }
+  const existing = await readOrNull(planPath(run.state.run_id));
+  if (existing === null) {
+    throw new Error(`Cannot revise plan: no plan.md exists yet. Run plan first.`);
+  }
+
+  const input = await buildPlannerInput({
+    runId: run.state.run_id,
+    targetRepo: run.state.target_repo,
+    runDirAbs: runDir(run.state.run_id),
+    taskMdAbs: taskPath(run.state.run_id),
+    transcriptPath: path.join(logsDir(run.state.run_id), 'planner.log'),
+    revisionMessage: args.revisionMessage
+  });
+
+  const result = await runSession(input);
+  if (!result.success) {
+    throw new Error(`planner revision session failed: ${result.failureSubtype ?? 'unknown'}`);
+  }
+
+  const planMd = await readOrNull(planPath(run.state.run_id));
+  if (planMd === null) {
+    throw new Error(`planner revision lost plan.md at ${planPath(run.state.run_id)}`);
+  }
+
+  const sprints = parseSprintsFromPlan(planMd);
+  if (sprints.length === 0) {
+    throw new Error('revised plan.md has no ## Sprint N: headers');
+  }
+
+  if (sprints.length !== run.state.total_sprints) {
+    await saveState({
+      ...run.state,
+      total_sprints: sprints.length,
+      updated_at: new Date().toISOString()
+    });
+  }
+}
+
 export function registerPlan(program: Command): void {
   program
     .command('plan')

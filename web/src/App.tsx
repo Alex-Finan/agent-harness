@@ -3,15 +3,11 @@ import { api, openEventStream, type RunState, type ServerEvent } from './api';
 import { RunList } from './components/RunList';
 import { RunDetail } from './components/RunDetail';
 import { NewRunDialog } from './components/NewRunDialog';
-import { PromptsPanel } from './components/PromptsPanel';
-
-type View = 'runs' | 'prompts';
 
 export function App() {
   const [runs, setRuns] = useState<RunState[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
-  const [view, setView] = useState<View>('runs');
   const [meta, setMeta] = useState<{ version: string; harnessHome: string } | null>(null);
 
   useEffect(() => {
@@ -19,8 +15,6 @@ export function App() {
     void refresh();
     const es = openEventStream((event: ServerEvent) => {
       if (event.type === 'hello') return;
-      // Any state-affecting event refreshes the run list so badges/cost stay
-      // current across all runs (cheap call, returns trimmed objects).
       if (
         event.type === 'run_state' ||
         event.type === 'run_created' ||
@@ -37,7 +31,11 @@ export function App() {
     try {
       const { runs } = await api.listRuns();
       setRuns(runs);
-      if (!selected && runs.length > 0) setSelected(runs[0].run_id);
+      // Use the functional setter so we read the *current* selection rather
+      // than the value captured when this `refresh` closure was created. The
+      // SSE handler in the mount-time effect keeps calling the very first
+      // refresh — without this, any event would reset selection to runs[0].
+      setSelected((current) => current ?? runs[0]?.run_id ?? null);
     } catch {
       /* ignore */
     }
@@ -56,32 +54,8 @@ export function App() {
           <span className="text-lg font-bold tracking-tight">agent-harness</span>
           {meta ? <span className="text-xs text-slate-500">v{meta.version}</span> : null}
         </div>
-        <div className="flex gap-1 border-b border-slate-800 px-2 py-2">
-          <button
-            className={`flex-1 rounded px-3 py-1 text-sm ${
-              view === 'runs' ? 'bg-slate-800 text-emerald-400' : 'text-slate-400 hover:text-slate-100'
-            }`}
-            onClick={() => setView('runs')}
-          >
-            Runs
-          </button>
-          <button
-            className={`flex-1 rounded px-3 py-1 text-sm ${
-              view === 'prompts' ? 'bg-slate-800 text-emerald-400' : 'text-slate-400 hover:text-slate-100'
-            }`}
-            onClick={() => setView('prompts')}
-          >
-            Prompts
-          </button>
-        </div>
         <div className="min-h-0 flex-1">
-          {view === 'runs' ? (
-            <RunList runs={runs} selectedId={selected} onSelect={setSelected} onNew={() => setShowNew(true)} />
-          ) : (
-            <div className="p-3 text-xs text-slate-500">
-              Edit planner/executor/evaluator system prompts on the right →
-            </div>
-          )}
+          <RunList runs={runs} selectedId={selected} onSelect={setSelected} onNew={() => setShowNew(true)} />
         </div>
         {meta ? (
           <div className="border-t border-slate-800 px-4 py-2 text-[10px] font-mono text-slate-600" title={meta.harnessHome}>
@@ -90,11 +64,7 @@ export function App() {
         ) : null}
       </aside>
       <main className="min-w-0 flex-1 overflow-hidden bg-slate-950">
-        {view === 'prompts' ? (
-          <div className="h-full p-4">
-            <PromptsPanel />
-          </div>
-        ) : selected ? (
+        {selected ? (
           <RunDetail key={selected} runId={selected} />
         ) : (
           <div className="m-6 text-sm text-slate-500">
