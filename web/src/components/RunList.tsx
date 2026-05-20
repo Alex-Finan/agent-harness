@@ -30,6 +30,69 @@ function loadFilters(): Filters {
   }
 }
 
+function RunRow({
+  r,
+  selected,
+  onSelect
+}: {
+  r: RunState;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const isIdle =
+    r.status === 'in_progress' &&
+    r.next_role !== 'done' &&
+    !r.dispatching;
+
+  return (
+    <li
+      className={`cursor-pointer px-4 py-3 transition ${selected ? 'bg-slate-800/60' : 'hover:bg-slate-900'}`}
+      onClick={onSelect}
+    >
+      <div className="mb-1 flex items-center gap-2">
+        <StatusBadge status={r.status} />
+        {r.status === 'halted' && (
+          <span className="animate-pulse rounded border border-red-700 bg-red-900/60 px-1.5 py-0.5 text-[10px] font-semibold text-red-400">
+            FAIL
+          </span>
+        )}
+        {r.dispatching ? (
+          <span className="badge badge-running animate-pulse">{r.dispatching}…</span>
+        ) : null}
+        {isIdle && (
+          <span className="rounded border border-yellow-700 bg-yellow-900/40 px-1.5 py-0.5 text-[10px] font-semibold text-yellow-400">
+            needs action
+          </span>
+        )}
+        <span className="ml-auto text-xs text-slate-500">{formatCost(r.cost_total_usd)}</span>
+      </div>
+      <div className="truncate text-sm font-medium text-slate-100" title={r.task_summary}>
+        {r.task_summary || '(no task summary)'}
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+        <span>
+          sprint {r.current_sprint}/{r.total_sprints || '?'}
+        </span>
+        <span>·</span>
+        <span>{r.next_role}</span>
+        <span>·</span>
+        <span>{formatRelative(r.updated_at)}</span>
+        {r.base_branch && (
+          <>
+            <span>·</span>
+            <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+              ⎇ {r.base_branch}
+            </span>
+          </>
+        )}
+      </div>
+      <div className="mt-1 truncate font-mono text-[10px] text-slate-600" title={r.run_id}>
+        {r.run_id}
+      </div>
+    </li>
+  );
+}
+
 export function RunList({
   runs,
   selectedId,
@@ -58,6 +121,22 @@ export function RunList({
   });
 
   const hiddenCount = runs.length - visibleRuns.length;
+
+  // Group visibleRuns by base_branch. Runs without base_branch go into the
+  // ungrouped bucket and are rendered with no section header.
+  const groupMap = new Map<string, RunState[]>();
+  const ungrouped: RunState[] = [];
+
+  for (const r of visibleRuns) {
+    if (r.base_branch) {
+      if (!groupMap.has(r.base_branch)) {
+        groupMap.set(r.base_branch, []);
+      }
+      groupMap.get(r.base_branch)!.push(r);
+    } else {
+      ungrouped.push(r);
+    }
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -101,41 +180,39 @@ export function RunList({
               : `All ${runs.length} runs are hidden by filters.`}
           </div>
         ) : (
-          <ul className="divide-y divide-slate-800">
-            {visibleRuns.map((r) => {
-              const selected = r.run_id === selectedId;
-              return (
-                <li
-                  key={r.run_id}
-                  className={`cursor-pointer px-4 py-3 transition ${selected ? 'bg-slate-800/60' : 'hover:bg-slate-900'}`}
-                  onClick={() => onSelect(r.run_id)}
-                >
-                  <div className="mb-1 flex items-center gap-2">
-                    <StatusBadge status={r.status} />
-                    {r.dispatching ? (
-                      <span className="badge badge-running animate-pulse">{r.dispatching}…</span>
-                    ) : null}
-                    <span className="ml-auto text-xs text-slate-500">{formatCost(r.cost_total_usd)}</span>
-                  </div>
-                  <div className="truncate text-sm font-medium text-slate-100" title={r.task_summary}>
-                    {r.task_summary || '(no task summary)'}
-                  </div>
-                  <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
-                    <span>
-                      sprint {r.current_sprint}/{r.total_sprints || '?'}
-                    </span>
-                    <span>·</span>
-                    <span>{r.next_role}</span>
-                    <span>·</span>
-                    <span>{formatRelative(r.updated_at)}</span>
-                  </div>
-                  <div className="mt-1 truncate font-mono text-[10px] text-slate-600" title={r.run_id}>
-                    {r.run_id}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+          <div>
+            {/* Named groups — each gets a subtle section header */}
+            {Array.from(groupMap.entries()).map(([branch, groupRuns]) => (
+              <div key={branch}>
+                <header className="border-b border-t border-slate-800 bg-slate-900/60 px-4 py-1.5 text-[10px] font-semibold text-slate-400">
+                  ⎇ {branch}
+                </header>
+                <ul className="divide-y divide-slate-800">
+                  {groupRuns.map((r) => (
+                    <RunRow
+                      key={r.run_id}
+                      r={r}
+                      selected={r.run_id === selectedId}
+                      onSelect={() => onSelect(r.run_id)}
+                    />
+                  ))}
+                </ul>
+              </div>
+            ))}
+            {/* Ungrouped runs — no section header */}
+            {ungrouped.length > 0 && (
+              <ul className="divide-y divide-slate-800">
+                {ungrouped.map((r) => (
+                  <RunRow
+                    key={r.run_id}
+                    r={r}
+                    selected={r.run_id === selectedId}
+                    onSelect={() => onSelect(r.run_id)}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </div>
     </div>

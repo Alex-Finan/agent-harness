@@ -3,9 +3,50 @@ import { api, type RunDetail, type SprintSnapshot } from '../api';
 import { Markdown } from './Markdown';
 import { VerdictBadge } from './StatusBadge';
 
+type Phase = 'pending' | 'contract-ready' | 'running' | 'passed' | 'failed';
+
+function computePhase(
+  s: SprintSnapshot,
+  cur: number,
+  nextRole: string,
+  dispatchingActive: boolean,
+): Phase {
+  if (s.verdict === 'PASS') return 'passed';
+  if (s.verdict === 'FAIL') return 'failed';
+  const isCurrent = s.num === cur && nextRole !== 'done';
+  if (isCurrent && dispatchingActive) return 'running';
+  if (s.contractMd !== null && s.outputMd === null) return 'contract-ready';
+  return 'pending';
+}
+
+const PHASE_ICON_CLASS: Record<Phase, string> = {
+  pending: 'border-slate-700 bg-slate-800 text-slate-400',
+  'contract-ready': 'border-indigo-700 bg-indigo-700/30 text-indigo-300',
+  running: 'border-amber-700 bg-amber-700/30 text-amber-300',
+  passed: 'border-emerald-700 bg-emerald-700/30 text-emerald-300',
+  failed: 'border-rose-700 bg-rose-700/30 text-rose-300',
+};
+
+const PHASE_BADGE_CLASS: Record<Phase, string> = {
+  pending: 'border border-slate-700 bg-slate-800 text-slate-400',
+  'contract-ready': 'border border-indigo-700 bg-indigo-900/40 text-indigo-300',
+  running: 'border border-amber-700 bg-amber-900/40 text-amber-300',
+  passed: 'border border-emerald-700 bg-emerald-900/40 text-emerald-300',
+  failed: 'border border-rose-700 bg-rose-900/40 text-rose-300',
+};
+
+const PHASE_LABEL: Record<Phase, string> = {
+  pending: 'pending',
+  'contract-ready': 'contract ready',
+  running: 'running',
+  passed: 'passed',
+  failed: 'failed',
+};
+
 export function SprintTimeline({ detail }: { detail: RunDetail }) {
   const sprints = detail.snapshot.sprints;
   const cur = detail.state.current_sprint;
+  const dispatchingActive = !!(detail.dispatching && !detail.dispatching.finished);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   if (sprints.length === 0) {
@@ -21,9 +62,9 @@ export function SprintTimeline({ detail }: { detail: RunDetail }) {
       <div className="border-b border-slate-800 px-4 py-2 text-sm font-semibold">sprints</div>
       <ol className="divide-y divide-slate-800">
         {sprints.map((s) => {
+          const phase = computePhase(s, cur, detail.state.next_role, dispatchingActive);
+          const isRunning = phase === 'running';
           const isCurrent = s.num === cur && detail.state.next_role !== 'done';
-          const finished = s.verdict === 'PASS';
-          const failed = s.verdict === 'FAIL';
           return (
             <li key={s.dirName} className="px-4 py-3">
               <button
@@ -31,15 +72,7 @@ export function SprintTimeline({ detail }: { detail: RunDetail }) {
                 onClick={() => setExpanded(expanded === s.dirName ? null : s.dirName)}
               >
                 <div
-                  className={`flex h-6 w-6 items-center justify-center rounded-full border text-xs ${
-                    finished
-                      ? 'border-emerald-700 bg-emerald-700/30 text-emerald-300'
-                      : failed
-                      ? 'border-rose-700 bg-rose-700/30 text-rose-300'
-                      : isCurrent
-                      ? 'border-amber-700 bg-amber-700/30 text-amber-300'
-                      : 'border-slate-700 bg-slate-800 text-slate-400'
-                  }`}
+                  className={`flex h-6 w-6 items-center justify-center rounded-full border text-xs ${PHASE_ICON_CLASS[phase]}${isRunning ? ' animate-pulse' : ''}`}
                 >
                   {s.num}
                 </div>
@@ -47,9 +80,14 @@ export function SprintTimeline({ detail }: { detail: RunDetail }) {
                   <div className="text-sm font-medium text-slate-100">{s.slug.replace(/-/g, ' ')}</div>
                   <div className="text-xs text-slate-500">{s.dirName}</div>
                 </div>
+                <span className={`badge ${PHASE_BADGE_CLASS[phase]}${isRunning ? ' animate-pulse' : ''}`}>
+                  {PHASE_LABEL[phase]}
+                </span>
                 <VerdictBadge verdict={s.verdict} />
                 {isCurrent ? (
-                  <span className="badge badge-running animate-pulse">{detail.state.next_role}</span>
+                  <span className={`badge badge-running${dispatchingActive ? ' animate-pulse' : ''}`}>
+                    {detail.state.next_role}
+                  </span>
                 ) : null}
                 <span className="text-slate-600">{expanded === s.dirName ? '▾' : '▸'}</span>
               </button>
