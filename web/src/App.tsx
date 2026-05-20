@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, openEventStream, type RunState, type ServerEvent } from './api';
 import { RunList } from './components/RunList';
 import { RunDetail } from './components/RunDetail';
+import { RunOverview } from './components/RunOverview';
 import { NewRunDialog } from './components/NewRunDialog';
 
 export function App() {
@@ -67,9 +68,7 @@ export function App() {
         {selected ? (
           <RunDetail key={selected} runId={selected} />
         ) : (
-          <div className="m-6 text-sm text-slate-500">
-            Select a run on the left, or click "+ New run" to create one.
-          </div>
+          <RunOverview runs={runs} onSelect={setSelected} />
         )}
       </main>
       {showNew ? (

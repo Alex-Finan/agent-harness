@@ -16,14 +16,13 @@ import { PlanChat } from './PlanChat';
 import { formatCost, formatRelative } from '../lib/format';
 
 /**
- * A run is in the "planning phase" until any sprint produces output.md.
- * During this window the operator iterates on plan.md with the planner;
- * the sprint timeline and other run-time panels stay hidden.
+ * A run is in the "planning phase" until the planner writes the first contract.md.
+ * As soon as any sprint has a contract, the sprint timeline becomes visible and
+ * the operator can track executor/evaluator progress.
  */
 function isPlanningPhase(detail: RunDetailT): boolean {
   const sprints = detail.snapshot.sprints;
-  const anySprintRan = sprints.some((s) => s.outputMd !== null || s.verdictMd !== null);
-  return !anySprintRan;
+  return !sprints.some((s) => s.contractMd !== null);
 }
 
 export function RunDetail({ runId }: { runId: string }) {
@@ -216,6 +215,7 @@ export function RunDetail({ runId }: { runId: string }) {
               <VerdictBadge verdict={s.last_verdict ?? null} />
               <span className="text-xs text-slate-500">updated {formatRelative(s.updated_at)}</span>
             </div>
+            <RolePill nextRole={s.next_role} dispatchingActive={!!dispatchingActive} />
             <div className="mt-2 truncate text-lg font-semibold" title={s.task_summary}>
               {s.task_summary}
             </div>
@@ -254,6 +254,11 @@ export function RunDetail({ runId }: { runId: string }) {
                 abort
               </button>
             </div>
+            {s.status === 'in_progress' && s.next_role !== 'done' && !dispatchingActive ? (
+              <span className="animate-pulse text-xs font-medium text-yellow-400 border border-yellow-600/50 rounded px-2 py-0.5">
+                operator action needed
+              </span>
+            ) : null}
             {error ? <span className="text-xs text-rose-400">{error}</span> : null}
           </div>
         </div>
@@ -319,7 +324,7 @@ function PlanningView({
   );
 }
 
-function SprintView({
+function SprintView({ // renders sprint timeline, transcript, plan, cost, and revisePlan affordance
   detail,
   appendByLog,
   resetTick
@@ -328,19 +333,107 @@ function SprintView({
   appendByLog: Record<string, TranscriptMessage[]>;
   resetTick: Record<string, number>;
 }) {
+  const [reviseMessage, setReviseMessage] = useState('');
+  const [reviseLoading, setReviseLoading] = useState(false);
+  const [reviseError, setReviseError] = useState<string | null>(null);
+
+  const dispatchingActive = !!(detail.dispatching && !detail.dispatching.finished);
+  const runId = detail.state.run_id;
+
+  async function handleRevisePlan() {
+    if (!reviseMessage.trim()) return;
+    setReviseLoading(true);
+    setReviseError(null);
+    try {
+      await api.revisePlan(runId, reviseMessage.trim());
+      setReviseMessage('');
+    } catch (e) {
+      setReviseError((e as Error).message);
+    } finally {
+      setReviseLoading(false);
+    }
+  }
+
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
       <SprintTimeline detail={detail} />
       <div className="h-[60vh]">
         <TranscriptStream
-          runId={detail.state.run_id}
+          runId={runId}
           logFiles={detail.snapshot.logFiles}
           appendByLog={appendByLog}
           resetTick={resetTick}
         />
       </div>
-      <PlanEditor runId={detail.state.run_id} planMd={detail.snapshot.planMd} />
-      <CostPanel cost={detail.cost} />
+      <PlanEditor runId={runId} planMd={detail.snapshot.planMd} />
+      <div className="flex flex-col gap-4">
+        <CostPanel cost={detail.cost} />
+        {/* Revise Plan bar — lets operators ask the planner to adjust direction mid-run */}
+        <div className="rounded border border-slate-700 bg-slate-900 p-3">
+          <div className="mb-2 text-xs font-semibold text-slate-400">Revise Plan</div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 disabled:opacity-50 focus:border-amber-600 focus:outline-none"
+              placeholder="Ask planner to revise…"
+              value={reviseMessage}
+              onChange={(e) => setReviseMessage(e.target.value)}
+              disabled={dispatchingActive || reviseLoading}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void handleRevisePlan();
+              }}
+            />
+            <button
+              className="btn btn-primary shrink-0"
+              onClick={() => void handleRevisePlan()}
+              disabled={dispatchingActive || reviseLoading || !reviseMessage.trim()}
+            >
+              {reviseLoading ? 'Revising…' : 'Revise'}
+            </button>
+          </div>
+          {reviseError ? (
+            <p className="mt-1.5 text-xs text-rose-400">{reviseError}</p>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const ROLE_STEPS = ['planner', 'executor', 'evaluator'] as const;
+
+function RolePill({
+  nextRole,
+  dispatchingActive
+}: {
+  nextRole: 'planner' | 'executor' | 'evaluator' | 'done';
+  dispatchingActive: boolean;
+}) {
+  return (
+    <div className="mt-2 flex items-center gap-1">
+      {ROLE_STEPS.map((step, idx) => {
+        const isActive = nextRole === step;
+        const isDone = nextRole === 'done';
+
+        let stepClass: string;
+        if (isDone) {
+          stepClass = 'text-slate-500';
+        } else if (isActive) {
+          stepClass = 'rounded px-2 py-0.5 text-xs font-semibold bg-amber-700/30 text-amber-300' +
+            (dispatchingActive ? ' animate-pulse' : '');
+        } else {
+          stepClass = 'text-xs text-slate-500';
+        }
+
+        return (
+          <span key={step} className="flex items-center gap-1">
+            {idx > 0 && (
+              <span className="text-slate-600 text-xs">→</span>
+            )}
+            <span className={stepClass}>{step}</span>
+          </span>
+        );
+      })}
     </div>
   );
 }
