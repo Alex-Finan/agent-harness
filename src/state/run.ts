@@ -22,10 +22,16 @@ export interface CreateRunInput {
   targetRepo: string;
   task: string;
   maxRetries: number;
+  /** Pre-allocated run id. Lets callers (e.g. `harness init --base`) reserve
+   *  the id before this function runs so derived paths (worktrees) can use it. */
+  runId?: string;
+  /** Extra state fields merged into the initial state.json — used to persist
+   *  worktree metadata (origin_repo, worktree_path, branch, base_branch). */
+  extraState?: Partial<State>;
 }
 
 export async function createRun(input: CreateRunInput): Promise<Run> {
-  const runId = generateRunId();
+  const runId = input.runId ?? generateRunId();
   const now = new Date().toISOString();
 
   const state: State = {
@@ -39,7 +45,8 @@ export async function createRun(input: CreateRunInput): Promise<Run> {
     max_retries: input.maxRetries,
     status: 'in_progress',
     created_at: now,
-    updated_at: now
+    updated_at: now,
+    ...input.extraState
   };
 
   await ensureDir(runDir(runId));

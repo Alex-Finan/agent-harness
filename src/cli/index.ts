@@ -16,6 +16,7 @@ export async function main(argv: string[]): Promise<void> {
   const { registerLogs } = await import('./commands/logs.js');
   const { registerRetry } = await import('./commands/retry.js');
   const { registerAbort } = await import('./commands/abort.js');
+  const { registerFinish } = await import('./commands/finish.js');
 
   registerInit(program);
   registerPlan(program);
@@ -25,6 +26,7 @@ export async function main(argv: string[]): Promise<void> {
   registerLogs(program);
   registerRetry(program);
   registerAbort(program);
+  registerFinish(program);
 
   await program.parseAsync(argv);
 }

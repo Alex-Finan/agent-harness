@@ -18,7 +18,15 @@ export const StateSchema = z.object({
   status: StatusEnum,
   created_at: z.string(),
   updated_at: z.string(),
-  last_verdict: z.enum(['PASS', 'FAIL']).optional()
+  last_verdict: z.enum(['PASS', 'FAIL']).optional(),
+  // Worktree / stacking metadata. Present when the run was initialized with
+  // --base; absent for legacy single-checkout runs. target_repo points at
+  // worktree_path in that case, while origin_repo is the canonical checkout
+  // where `git worktree add/remove` operate.
+  origin_repo: z.string().optional(),
+  worktree_path: z.string().optional(),
+  branch: z.string().optional(),
+  base_branch: z.string().optional()
 });
 
 export type State = z.infer<typeof StateSchema>;
