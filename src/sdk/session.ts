@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { createRequire } from 'node:module';
+import { existsSync } from 'node:fs';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { writeAtomic, ensureDir } from '../lib/fs.js';
 
@@ -15,7 +16,7 @@ export interface RunSessionInput {
   maxBudgetUsd: number;
   transcriptPath: string;
   model?: string;
-  /** Override the path to the Claude Code executable. If omitted, resolved from the SDK package. */
+  /** Override the path to the Claude Code executable. If omitted, resolved from the SDK's native-binary sibling package. */
   cliPath?: string;
 }
 
@@ -28,13 +29,39 @@ export interface RunSessionResult {
 }
 
 /**
- * Resolve the path to the SDK's bundled cli.js.
- * Anchors resolution to this file's location via createRequire(import.meta.url),
- * so the SDK package is found regardless of where the CLI is invoked from.
+ * Resolve the path to the Claude Code native binary that the SDK spawns.
+ *
+ * The SDK ships the binary in a platform-specific sibling package:
+ *   @anthropic-ai/claude-agent-sdk-{platform}-{arch}/claude
+ *
+ * We resolve that package's manifest, then derive the binary path.
+ * Falls back to the system `claude` on PATH if the sibling package is absent.
  */
 function resolveCliPath(): string {
-  const sdkMain = _require.resolve('@anthropic-ai/claude-agent-sdk');
-  return path.join(path.dirname(sdkMain), 'cli.js');
+  const platform = process.platform;
+  const arch = process.arch;
+  const ext = platform === 'win32' ? '.exe' : '';
+  const candidates = [`@anthropic-ai/claude-agent-sdk-${platform}-${arch}/claude${ext}`];
+  if (platform === 'linux') {
+    candidates.push(`@anthropic-ai/claude-agent-sdk-linux-${arch}-musl/claude`);
+  }
+  for (const c of candidates) {
+    try {
+      const resolved = _require.resolve(c);
+      if (existsSync(resolved)) return resolved;
+    } catch {
+      // fall through
+    }
+  }
+  // Fallback: system `claude` on PATH
+  const systemClaude = `/usr/local/bin/claude`;
+  if (existsSync(systemClaude)) return systemClaude;
+  const homeClaude = path.join(process.env.HOME ?? '', '.local/bin/claude');
+  if (existsSync(homeClaude)) return homeClaude;
+  throw new Error(
+    `Could not locate the Claude Code binary. Tried: ${candidates.join(', ')}, ${systemClaude}, ${homeClaude}. ` +
+      `Pass cliPath in RunSessionInput to override.`
+  );
 }
 
 export async function runSession(input: RunSessionInput): Promise<RunSessionResult> {
@@ -58,7 +85,8 @@ export async function runSession(input: RunSessionInput): Promise<RunSessionResu
       allowDangerouslySkipPermissions: true,
       persistSession: false,
       allowedTools: input.allowedTools,
-      cwd: input.cwd
+      cwd: input.cwd,
+      stderr: (chunk: string) => process.stderr.write(`[sdk-stderr] ${chunk}`)
     }
   })) {
     await fs.appendFile(input.transcriptPath, JSON.stringify(message) + '\n', 'utf8');
