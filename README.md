@@ -17,9 +17,34 @@ cd ~/Developer/agent-harness
 npm install
 npm run build
 ln -sf "$PWD/bin/harness" /usr/local/bin/harness    # optional
+
+# build the web UI bundle (one-time, also rebuilds on each `harness serve` cycle if you re-run)
+npm run build:web
 ```
 
 Set `ANTHROPIC_API_KEY` in your env.
+
+## Web UI
+
+```bash
+harness serve          # serves http://127.0.0.1:8787
+harness serve --port 9000 --host 0.0.0.0
+```
+
+The UI streams live state from `~/.agent-harness/runs/`. From the browser you can:
+
+- watch **multiple harnesses iterating simultaneously** — sidebar lists every run with status, current role, sprint, cost
+- **start new runs** from a form (target repo + task + optional `--base`/`--branch` for stacked workflows)
+- **auto-iterate** — kicks off planner → executor/evaluator loop and runs to completion or halt
+- **visualize the plan** as rendered markdown, edit it inline, and save (re-parses sprint headers, updates `total_sprints` when safe)
+- **see sprint progress** with PASS/FAIL badges and per-sprint contract/output/verdict tabs
+- watch the **live SDK transcript** stream (assistant text, tool calls, tool results, result message) via Server-Sent Events
+- see **cost** per role, per sprint, per session — with token-level breakdown (input/output/cache create/cache read), turns, duration
+- **edit the system prompts** for planner/executor/evaluator from the UI (writes `src/prompts/*.md`; takes effect on next role invocation)
+- **edit per-sprint contracts** inline (planner-written rubrics; useful when the planner over- or under-scopes a sprint)
+- **abort** runs from the UI
+
+Cost is parsed from the JSONL transcript files the SDK writes — no extra instrumentation.
 
 ## Mental model: run vs sprint vs PR
 
@@ -88,6 +113,7 @@ harness init --repo ~/Developer/some-repo --task "fix the bug"
 | `harness retry` | Bump current role to re-run |
 | `harness finish [--purge]` | Mark a run completed; optionally remove the worktree |
 | `harness abort [--purge]` | Mark a run aborted; optionally remove the worktree |
+| `harness serve [--port N]` | Start the local web UI (live transcripts, costs, prompt + plan editing, multi-run dashboard) |
 
 See `docs/superpowers/specs/2026-05-19-agent-harness-design.md` for the full design.
 
