@@ -10,6 +10,7 @@ import {
   logsDir
 } from '../state/paths.js';
 import { parseVerdict } from '../state/artifacts.js';
+import { readPendingComments, type PendingComment } from '../state/pendingComments.js';
 
 export interface SprintSnapshot {
   dirName: string;
@@ -30,6 +31,7 @@ export interface RunSnapshot {
   planMd: string | null;
   sprints: SprintSnapshot[];
   logFiles: string[];
+  pendingComments: PendingComment[];
 }
 
 /**
@@ -148,13 +150,14 @@ export async function readRunSnapshot(runId: string): Promise<RunSnapshot> {
   const overviewMd = await readOrNull(overviewPath(runId));
   const planMd = await readOrNull(planPath(runId));
   const sprints = await readSprints(runId);
+  const pendingComments = await readPendingComments(runId);
   let logFiles: string[] = [];
   try {
     logFiles = (await fs.readdir(logsDir(runId))).filter((f) => f.endsWith('.log')).sort();
   } catch {
     /* logs dir may not exist yet */
   }
-  return { taskMd, overviewMd, planMd, sprints, logFiles };
+  return { taskMd, overviewMd, planMd, sprints, logFiles, pendingComments };
 }
 
 export async function readTranscript(runId: string, logName: string): Promise<{ lines: unknown[]; raw: string }> {

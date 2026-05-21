@@ -56,6 +56,10 @@ body {
     @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
   }
 
+  mark.comment-anchor {
+    @apply rounded bg-amber-100 px-0.5 text-slate-900 ring-1 ring-amber-300 transition hover:bg-amber-200 cursor-pointer;
+  }
+
   .badge-running {
     @apply border border-emerald-300 bg-emerald-50 text-emerald-700;
   }

@@ -1,5 +1,6 @@
 import type { RunDetail, SprintSnapshot } from '../api';
 import { Markdown } from './Markdown';
+import { CommentableMarkdown } from './CommentableMarkdown';
 import { parsePlanSections } from '../lib/plan-diff';
 import { formatDuration, formatRelative } from '../lib/format';
 
@@ -15,20 +16,30 @@ export function InteractivePlanView({
   planMd,
   detail,
   focusedDirName,
-  onFocus
+  onFocus,
+  onCommentFocus
 }: {
   planMd: string;
   detail: RunDetail;
   focusedDirName: string | null;
   onFocus: (dirName: string) => void;
+  onCommentFocus?: (commentId: string) => void;
 }) {
   const { preamble, sprints: sections } = parsePlanSections(planMd);
+  const runId = detail.state.run_id;
+  const planComments = detail.snapshot.pendingComments.filter((c) => c.file === 'plan.md');
 
   if (sections.length === 0) {
     // Plan has no sprint headings — render raw markdown unchanged.
     return (
       <div className="px-4 py-3">
-        <Markdown source={planMd} />
+        <CommentableMarkdown
+          source={planMd}
+          file="plan.md"
+          runId={runId}
+          comments={planComments}
+          onCommentFocus={onCommentFocus}
+        />
       </div>
     );
   }
@@ -39,7 +50,16 @@ export function InteractivePlanView({
 
   return (
     <div className="space-y-4 px-4 py-3">
-      {preamble ? <Markdown source={preamble} /> : null}
+      {preamble ? (
+        <CommentableMarkdown
+          source={preamble}
+          anchorSource={planMd}
+          file="plan.md"
+          runId={runId}
+          comments={planComments}
+          onCommentFocus={onCommentFocus}
+        />
+      ) : null}
       {sections.map((section) => {
         const sprint = sprintByNum.get(section.num);
         const phase = sprint
@@ -79,7 +99,14 @@ export function InteractivePlanView({
             </button>
             {section.body ? (
               <div className="px-3 pb-2">
-                <Markdown source={section.body} />
+                <CommentableMarkdown
+                  source={section.body}
+                  anchorSource={planMd}
+                  file="plan.md"
+                  runId={runId}
+                  comments={planComments}
+                  onCommentFocus={onCommentFocus}
+                />
               </div>
             ) : null}
           </section>

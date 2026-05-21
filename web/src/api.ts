@@ -45,12 +45,29 @@ export interface SprintSnapshot {
   verdictAt: string | null;
 }
 
+export interface CommentAnchor {
+  start_line: number;
+  start_col: number;
+  end_line: number;
+  end_col: number;
+  quoted_text: string;
+}
+
+export interface PendingComment {
+  id: string;
+  file: string;
+  anchor: CommentAnchor;
+  body: string;
+  created_at: string;
+}
+
 export interface RunSnapshot {
   taskMd: string | null;
   overviewMd: string | null;
   planMd: string | null;
   sprints: SprintSnapshot[];
   logFiles: string[];
+  pendingComments: PendingComment[];
 }
 
 export interface RoleCost {
@@ -181,7 +198,25 @@ export const api = {
       body: JSON.stringify({ anthropic_api_key: key })
     }),
 
-  clearApiKey: () => http<ApiKeyStatus>('/api/config', { method: 'DELETE' })
+  clearApiKey: () => http<ApiKeyStatus>('/api/config', { method: 'DELETE' }),
+
+  listPendingComments: (id: string) =>
+    http<{ comments: PendingComment[] }>(`/api/runs/${id}/pending-comments`),
+
+  addPendingComment: (id: string, body: { file: string; anchor: CommentAnchor; body: string }) =>
+    http<{ comment: PendingComment }>(`/api/runs/${id}/pending-comments`, {
+      method: 'POST',
+      body: JSON.stringify(body)
+    }),
+
+  patchPendingComment: (id: string, cid: string, body: string) =>
+    http<{ ok: boolean }>(`/api/runs/${id}/pending-comments/${cid}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ body })
+    }),
+
+  deletePendingComment: (id: string, cid: string) =>
+    http<{ ok: boolean }>(`/api/runs/${id}/pending-comments/${cid}`, { method: 'DELETE' })
 };
 
 export interface ApiKeyStatus {
@@ -225,6 +260,7 @@ export type ServerEvent =
   | { type: 'run_created'; runId: string; state: RunState }
   | { type: 'plan'; runId: string; planMd: string }
   | { type: 'overview'; runId: string; overviewMd: string }
+  | { type: 'pending_comments'; runId: string; comments: PendingComment[] }
   | { type: 'contract'; runId: string; sprint: string; contractMd: string }
   | { type: 'output'; runId: string; sprint: string; outputMd: string }
   | { type: 'verdict'; runId: string; sprint: string; verdictMd: string }

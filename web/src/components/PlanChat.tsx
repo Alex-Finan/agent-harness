@@ -4,25 +4,32 @@ import { api } from '../api';
 export function PlanChat({
   runId,
   busy,
-  disabled
+  disabled,
+  pendingCommentCount = 0
 }: {
   runId: string;
   busy: boolean;
   disabled?: boolean;
+  pendingCommentCount?: number;
 }) {
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<Array<{ at: string; text: string }>>([]);
+  const [history, setHistory] = useState<Array<{ at: string; text: string; comments: number }>>([]);
 
   async function send() {
     const text = message.trim();
-    if (!text) return;
+    // Allow sending with no text when there are pending comments to bundle —
+    // the backend rejects empty-text + zero-comments, so we mirror that here.
+    if (!text && pendingCommentCount === 0) return;
     setSubmitting(true);
     setError(null);
     try {
       await api.revisePlan(runId, text);
-      setHistory((h) => [...h, { at: new Date().toISOString(), text }]);
+      setHistory((h) => [
+        ...h,
+        { at: new Date().toISOString(), text, comments: pendingCommentCount }
+      ]);
       setMessage('');
     } catch (e) {
       setError((e as Error).message);
@@ -49,8 +56,15 @@ export function PlanChat({
             <div key={i} className="rounded border border-slate-200 bg-white/60 px-3 py-2">
               <div className="text-[10px] uppercase tracking-wide text-slate-500">
                 you · {new Date(h.at).toLocaleTimeString()}
+                {h.comments > 0 ? (
+                  <span className="ml-2 text-amber-600">
+                    + {h.comments} comment{h.comments === 1 ? '' : 's'}
+                  </span>
+                ) : null}
               </div>
-              <div className="mt-1 whitespace-pre-wrap text-slate-800">{h.text}</div>
+              <div className="mt-1 whitespace-pre-wrap text-slate-800">
+                {h.text || <em className="text-slate-500">(comments only)</em>}
+              </div>
             </div>
           ))
         )}
@@ -77,12 +91,17 @@ export function PlanChat({
             }
           }}
         />
+        {pendingCommentCount > 0 ? (
+          <div className="mt-1 text-[11px] text-amber-700">
+            {pendingCommentCount} pending comment{pendingCommentCount === 1 ? '' : 's'} will be sent with this iteration
+          </div>
+        ) : null}
         <div className="mt-2 flex items-center justify-between">
           <div className="text-[10px] text-slate-500">⌘/Ctrl + Enter to send</div>
           <button
             className="btn btn-primary"
             onClick={send}
-            disabled={disabled || isBusy || !message.trim()}
+            disabled={disabled || isBusy || (!message.trim() && pendingCommentCount === 0)}
           >
             {submitting ? 'Sending…' : busy ? 'Planner busy' : 'Send'}
           </button>

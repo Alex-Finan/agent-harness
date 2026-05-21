@@ -9,6 +9,13 @@ import { writeAtomic, readOrNull } from '../lib/fs.js';
 import { VERSION } from '../index.js';
 import { parseSprintsFromPlan } from '../state/artifacts.js';
 import { readRunSnapshot, readTranscript, readSprintPips } from './readers.js';
+import {
+  readPendingComments,
+  writePendingComments,
+  newCommentId,
+  isValidCommentFile,
+  type PendingComment
+} from '../state/pendingComments.js';
 import { readAllPrompts, writePrompt, isPromptName } from './prompts.js';
 import { getApiKeyStatus, setApiKey, clearApiKey } from '../state/config.js';
 import { computeRunCost } from './cost.js';
@@ -39,7 +46,9 @@ const OverviewBody = z.object({
 });
 
 const PlanReviseBody = z.object({
-  message: z.string().min(1)
+  // Free-text portion may be empty when the operator is sending only inline
+  // comments. The endpoint enforces that comments OR text must be present.
+  message: z.string().default('')
 });
 
 const ContractBody = z.object({
@@ -52,6 +61,24 @@ const PromptBody = z.object({
 
 const ConfigBody = z.object({
   anthropic_api_key: z.string().min(1)
+});
+
+const CommentAnchor = z.object({
+  start_line: z.number().int().nonnegative(),
+  start_col: z.number().int().nonnegative(),
+  end_line: z.number().int().nonnegative(),
+  end_col: z.number().int().nonnegative(),
+  quoted_text: z.string()
+});
+
+const NewCommentBody = z.object({
+  file: z.string().min(1),
+  anchor: CommentAnchor,
+  body: z.string().min(1)
+});
+
+const PatchCommentBody = z.object({
+  body: z.string().min(1)
 });
 
 export async function buildServer(opts: BuildServerOptions = {}): Promise<{
@@ -172,6 +199,13 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
       reply.code(409);
       return { error: 'run already has an in-flight role' };
     }
+    // Require either free-text or at least one pending comment so we never
+    // dispatch the planner with literally nothing to revise.
+    const pending = await readPendingComments(id);
+    if (parsed.data.message.trim().length === 0 && pending.length === 0) {
+      reply.code(400);
+      return { error: 'revision needs either a message or at least one pending comment' };
+    }
     const handle = await dispatcher.startPlanRevise(id, parsed.data.message);
     return { runId: id, role: handle.role, startedAt: handle.startedAt };
   });
@@ -263,6 +297,67 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
     }
     const target = path.join(sprintsDir(id), sprint, 'contract.md');
     await writeAtomic(target, parsed.data.contractMd);
+    return { ok: true };
+  });
+
+  // -------------------- Pending comments (one-shot review notes) --------------------
+  // These get bundled into the planner's revisionMessage on the next iterate
+  // and cleared. Persistence is intentionally minimal — comments only live as
+  // long as the operator hasn't sent them yet.
+  app.get('/api/runs/:id/pending-comments', async (req) => {
+    const { id } = req.params as { id: string };
+    return { comments: await readPendingComments(id) };
+  });
+
+  app.post('/api/runs/:id/pending-comments', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const parsed = NewCommentBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid body', issues: parsed.error.issues };
+    }
+    if (!isValidCommentFile(parsed.data.file)) {
+      reply.code(400);
+      return { error: 'file must be overview.md, plan.md, or sprints/NN-slug/contract.md' };
+    }
+    const existing = await readPendingComments(id);
+    const comment: PendingComment = {
+      id: newCommentId(),
+      file: parsed.data.file,
+      anchor: parsed.data.anchor,
+      body: parsed.data.body,
+      created_at: new Date().toISOString()
+    };
+    await writePendingComments(id, [...existing, comment]);
+    return { comment };
+  });
+
+  app.patch('/api/runs/:id/pending-comments/:cid', async (req, reply) => {
+    const { id, cid } = req.params as { id: string; cid: string };
+    const parsed = PatchCommentBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid body', issues: parsed.error.issues };
+    }
+    const existing = await readPendingComments(id);
+    const next = existing.map((c) => (c.id === cid ? { ...c, body: parsed.data.body } : c));
+    if (next.length === existing.length && !existing.some((c) => c.id === cid)) {
+      reply.code(404);
+      return { error: 'comment not found' };
+    }
+    await writePendingComments(id, next);
+    return { ok: true };
+  });
+
+  app.delete('/api/runs/:id/pending-comments/:cid', async (req, reply) => {
+    const { id, cid } = req.params as { id: string; cid: string };
+    const existing = await readPendingComments(id);
+    const next = existing.filter((c) => c.id !== cid);
+    if (next.length === existing.length) {
+      reply.code(404);
+      return { error: 'comment not found' };
+    }
+    await writePendingComments(id, next);
     return { ok: true };
   });
 

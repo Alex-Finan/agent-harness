@@ -42,23 +42,20 @@ export function App() {
     try {
       const { runs } = await api.listRuns();
       setRuns(runs);
-      // Auto-select only when there's exactly one run AND no page is open.
-      // Otherwise default to the multi-run dashboard so the operator sees
-      // everything at once. Use the functional setters so we read the
-      // *current* state rather than a stale closure value; the SSE refresh
-      // fires often.
-      setSelected((current) => {
-        if (current) return current;
-        return runs.length === 1 ? runs[0].run_id : null;
-      });
+      // No auto-selection. The dashboard (RunOverview) is the default landing
+      // surface — the operator picks a run explicitly. Auto-selecting would
+      // fight an explicit "Dashboard" / Escape on every SSE tick.
     } catch {
       /* ignore */
     }
   }
 
   useEffect(() => {
+    // When the selected run disappears from the list (purged after abort,
+    // etc.), drop back to the dashboard rather than snapping to runs[0] —
+    // the user did not ask to look at some other arbitrary run.
     if (selected && !runs.some((r) => r.run_id === selected)) {
-      setSelected(runs[0]?.run_id ?? null);
+      setSelected(null);
     }
   }, [runs, selected]);
 

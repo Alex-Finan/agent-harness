@@ -1,13 +1,14 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import chokidar, { type FSWatcher } from 'chokidar';
-import { runsRoot, runDir, planPath, overviewPath, logsDir, sprintsDir, statePath } from '../state/paths.js';
+import { runsRoot, runDir, planPath, overviewPath, pendingCommentsPath, logsDir, sprintsDir, statePath } from '../state/paths.js';
 import { readOrNull } from '../lib/fs.js';
 import { parseVerdict } from '../state/artifacts.js';
 import { ensureDir } from '../lib/fs.js';
 import { computeRunCost } from './cost.js';
 import type { EventBus } from './events.js';
 import { StateSchema } from '../state/schema.js';
+import { readPendingComments } from '../state/pendingComments.js';
 
 interface FileCursor {
   size: number;
@@ -91,6 +92,13 @@ export class HarnessWatcher {
     if (filePath === overviewPath(runId)) {
       const overviewMd = await readOrNull(filePath);
       if (overviewMd !== null) this.bus.publish({ type: 'overview', runId, overviewMd });
+      return;
+    }
+
+    if (filePath === pendingCommentsPath(runId)) {
+      // readPendingComments tolerates ENOENT (returns []) so unlink is handled.
+      const comments = await readPendingComments(runId);
+      this.bus.publish({ type: 'pending_comments', runId, comments });
       return;
     }
 

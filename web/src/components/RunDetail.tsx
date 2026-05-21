@@ -9,6 +9,8 @@ import {
 } from '../api';
 import { PlanEditor } from './PlanEditor';
 import { OverviewView } from './OverviewView';
+import { ExpandablePanel } from './ExpandablePanel';
+import { PendingCommentsPanel } from './PendingCommentsPanel';
 import { SprintFocus, useDefaultFocus } from './SprintTimeline';
 import { PlanChat } from './PlanChat';
 import { RunStatusChip, computeChipState } from './RunStatusChip';
@@ -68,6 +70,12 @@ export function RunDetail({ runId }: { runId: string }) {
       } else if (event.type === 'overview') {
         setDetail((prev) =>
           prev ? { ...prev, snapshot: { ...prev.snapshot, overviewMd: event.overviewMd } } : prev
+        );
+      } else if (event.type === 'pending_comments') {
+        setDetail((prev) =>
+          prev
+            ? { ...prev, snapshot: { ...prev.snapshot, pendingComments: event.comments } }
+            : prev
         );
       } else if (event.type === 'contract') {
         updateSprint(setDetail, event.runId, event.sprint, (s) => ({
@@ -331,6 +339,8 @@ function PlanningView({
   const planMd = detail.snapshot.planMd;
   const overviewMd = detail.snapshot.overviewMd;
   const taskMd = detail.snapshot.taskMd;
+  const pendingComments = detail.snapshot.pendingComments ?? [];
+  const [focusedComment, setFocusedComment] = useState<string | null>(null);
 
   // Default to Overview when one exists — the whole point of the two-file
   // split is that you read the intuition first. Falls back to Plan for
@@ -357,48 +367,60 @@ function PlanningView({
   // consistent across the run lifecycle.
   return (
     <div className="grid h-full grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
-      <div className="panel flex max-h-[70vh] min-h-[60vh] flex-col overflow-hidden">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
-          <div className="flex items-center gap-1">
-            <TabButton
-              active={tab === 'overview'}
-              onClick={() => setTab('overview')}
-              disabled={overviewMd === null}
-              title={overviewMd === null ? 'No overview.md yet — pre-dates two-file convention' : undefined}
-            >
-              overview.md
-            </TabButton>
-            <TabButton active={tab === 'plan'} onClick={() => setTab('plan')}>
-              plan.md
-            </TabButton>
-          </div>
-          {tab === 'plan' ? (
-            <PlanEditButton runId={detail.state.run_id} planMd={planMd} />
-          ) : null}
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          {tab === 'overview' && overviewMd !== null ? (
-            <OverviewView
-              runId={detail.state.run_id}
-              overviewMd={overviewMd}
-            />
-          ) : (
-            <InteractivePlanView
-              planMd={planMd}
-              detail={detail}
-              focusedDirName={null}
-              onFocus={() => {
-                /* No sprint dirs yet — clicks are non-actionable here. */
-              }}
-            />
-          )}
-        </div>
-      </div>
+      <ExpandablePanel
+        header={() => (
+          <>
+            <div className="flex items-center gap-1">
+              <TabButton
+                active={tab === 'overview'}
+                onClick={() => setTab('overview')}
+                disabled={overviewMd === null}
+                title={overviewMd === null ? 'No overview.md yet — pre-dates two-file convention' : undefined}
+              >
+                overview.md
+              </TabButton>
+              <TabButton active={tab === 'plan'} onClick={() => setTab('plan')}>
+                plan.md
+              </TabButton>
+            </div>
+            <div className="ml-auto">
+              {tab === 'plan' ? (
+                <PlanEditButton runId={detail.state.run_id} planMd={planMd} />
+              ) : null}
+            </div>
+          </>
+        )}
+      >
+        {tab === 'overview' && overviewMd !== null ? (
+          <OverviewView
+            runId={detail.state.run_id}
+            overviewMd={overviewMd}
+            pendingComments={pendingComments}
+            onCommentFocus={setFocusedComment}
+          />
+        ) : (
+          <InteractivePlanView
+            planMd={planMd}
+            detail={detail}
+            focusedDirName={null}
+            onFocus={() => {
+              /* No sprint dirs yet — clicks are non-actionable here. */
+            }}
+            onCommentFocus={setFocusedComment}
+          />
+        )}
+      </ExpandablePanel>
       <div className="flex min-h-[60vh] flex-col gap-4">
+        <PendingCommentsPanel
+          runId={detail.state.run_id}
+          comments={pendingComments}
+          focusedId={focusedComment}
+        />
         <PlanChat
           runId={detail.state.run_id}
           busy={dispatchingActive}
           disabled={planMd === null}
+          pendingCommentCount={pendingComments.length}
         />
       </div>
     </div>
@@ -531,8 +553,15 @@ function SprintView({
   const dispatchingActive = !!(detail.dispatching && !detail.dispatching.finished);
   const runId = detail.state.run_id;
   const planMd = detail.snapshot.planMd;
+  const overviewMd = detail.snapshot.overviewMd;
+  const pendingComments = detail.snapshot.pendingComments ?? [];
+  const [focusedComment, setFocusedComment] = useState<string | null>(null);
   const defaultFocus = useDefaultFocus(detail);
   const [focused, setFocused] = useState<string | null>(defaultFocus);
+  // Same tab convention as PlanningView — default to overview when present
+  // so the authoritative narrative stays the front door for the entire run,
+  // not just the planning phase.
+  const [tab, setTab] = useState<'overview' | 'plan'>(overviewMd ? 'overview' : 'plan');
   useEffect(() => {
     if (!focused || !detail.snapshot.sprints.some((s) => s.dirName === focused)) {
       setFocused(defaultFocus);
@@ -550,30 +579,61 @@ function SprintView({
           (No separate top-level pip strip — the plan view itself acts as
           the sprint navigator, with each section showing phase + timing.) */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <div className="panel flex max-h-[70vh] flex-col overflow-hidden">
-          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
-            <span className="text-sm font-semibold text-slate-800">plan.md</span>
-            <PlanEditButton runId={runId} planMd={planMd} />
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {planMd ? (
-              <InteractivePlanView
-                planMd={planMd}
-                detail={detail}
-                focusedDirName={focused}
-                onFocus={setFocused}
-              />
-            ) : (
-              <div className="px-4 py-6 text-sm text-slate-500">
-                No plan yet.
+        <ExpandablePanel
+          collapsedClassName="panel flex max-h-[70vh] flex-col overflow-hidden"
+          header={() => (
+            <>
+              <div className="flex items-center gap-1">
+                <TabButton
+                  active={tab === 'overview'}
+                  onClick={() => setTab('overview')}
+                  disabled={overviewMd === null}
+                  title={overviewMd === null ? 'No overview.md yet — pre-dates two-file convention' : undefined}
+                >
+                  overview.md
+                </TabButton>
+                <TabButton active={tab === 'plan'} onClick={() => setTab('plan')}>
+                  plan.md
+                </TabButton>
               </div>
-            )}
-          </div>
-        </div>
+              <div className="ml-auto">
+                {tab === 'plan' ? (
+                  <PlanEditButton runId={runId} planMd={planMd} />
+                ) : null}
+              </div>
+            </>
+          )}
+        >
+          {tab === 'overview' && overviewMd !== null ? (
+            <OverviewView
+              runId={runId}
+              overviewMd={overviewMd}
+              pendingComments={pendingComments}
+              onCommentFocus={setFocusedComment}
+            />
+          ) : planMd ? (
+            <InteractivePlanView
+              planMd={planMd}
+              detail={detail}
+              focusedDirName={focused}
+              onFocus={setFocused}
+              onCommentFocus={setFocusedComment}
+            />
+          ) : (
+            <div className="px-4 py-6 text-sm text-slate-500">
+              No plan yet.
+            </div>
+          )}
+        </ExpandablePanel>
 
         <div className="max-h-[70vh]">
           {focusedSprint ? (
-            <SprintFocus runId={runId} sprint={focusedSprint} detail={detail} />
+            <SprintFocus
+              runId={runId}
+              sprint={focusedSprint}
+              detail={detail}
+              onCommentFocus={setFocusedComment}
+            />
           ) : (
             <div className="panel px-4 py-6 text-sm text-slate-500">
               No sprint to focus yet — the planner produces sprint directories before the executor runs.
@@ -582,11 +642,24 @@ function SprintView({
         </div>
       </div>
 
+      {pendingComments.length > 0 ? (
+        <PendingCommentsPanel
+          runId={runId}
+          comments={pendingComments}
+          focusedId={focusedComment}
+        />
+      ) : null}
+
       {/* Revise plan — sticky to the bottom of the viewport so it's always
           reachable even on long plans / long sprint detail. Subtle ring +
           backdrop separates it from scrolled content above. */}
       <div className="sticky bottom-0 z-10 -mx-4 -mb-4 border-t border-slate-200 bg-white/90 px-4 py-3 backdrop-blur">
-        <RevisePlanPanel runId={runId} planMd={planMd} busy={dispatchingActive} />
+        <RevisePlanPanel
+          runId={runId}
+          planMd={planMd}
+          busy={dispatchingActive}
+          pendingCommentCount={pendingComments.length}
+        />
       </div>
     </div>
   );

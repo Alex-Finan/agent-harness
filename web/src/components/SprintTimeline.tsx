@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type RunDetail, type SprintSnapshot } from '../api';
 import { Markdown } from './Markdown';
+import { CommentableMarkdown } from './CommentableMarkdown';
 import { VerdictBadge } from './StatusBadge';
 import { formatCost, formatDuration } from '../lib/format';
 
@@ -118,11 +119,13 @@ export function useDefaultFocus(detail: RunDetail): string | null {
 export function SprintFocus({
   runId,
   sprint,
-  detail
+  detail,
+  onCommentFocus
 }: {
   runId: string;
   sprint: SprintSnapshot;
   detail: RunDetail;
+  onCommentFocus?: (commentId: string) => void;
 }) {
   const [tab, setTab] = useState<'contract' | 'output' | 'verdict'>('contract');
   const [editContract, setEditContract] = useState(false);
@@ -236,7 +239,15 @@ export function SprintFocus({
               onChange={(e) => setContractDraft(e.target.value)}
             />
           ) : sprint.contractMd ? (
-            <Markdown source={sprint.contractMd} />
+            <CommentableMarkdown
+              source={sprint.contractMd}
+              file={`sprints/${sprint.dirName}/contract.md`}
+              runId={runId}
+              comments={detail.snapshot.pendingComments.filter(
+                (c) => c.file === `sprints/${sprint.dirName}/contract.md`
+              )}
+              onCommentFocus={onCommentFocus}
+            />
           ) : (
             <Empty>No contract.md yet — the planner produces it before the executor runs.</Empty>
           )

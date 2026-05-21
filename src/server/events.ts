@@ -5,6 +5,7 @@ export type ServerEvent =
   | { type: 'run_created'; runId: string; state: unknown }
   | { type: 'plan'; runId: string; planMd: string }
   | { type: 'overview'; runId: string; overviewMd: string }
+  | { type: 'pending_comments'; runId: string; comments: unknown[] }
   | { type: 'contract'; runId: string; sprint: string; contractMd: string }
   | { type: 'output'; runId: string; sprint: string; outputMd: string }
   | { type: 'verdict'; runId: string; sprint: string; verdictMd: string }

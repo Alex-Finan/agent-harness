@@ -29,6 +29,10 @@ export function overviewPath(runId: string): string {
   return path.join(runDir(runId), 'overview.md');
 }
 
+export function pendingCommentsPath(runId: string): string {
+  return path.join(runDir(runId), 'pending_comments.json');
+}
+
 function pad2(n: number): string {
   return n.toString().padStart(2, '0');
 }

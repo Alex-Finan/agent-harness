@@ -30,7 +30,8 @@ export function RunOverview({
   const aborted = ordered.filter((r) => r.status === 'aborted');
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-6">
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto max-w-6xl space-y-6 p-6">
       <header>
         <h1 className="text-2xl font-semibold text-blue-950">Dashboard</h1>
         <p className="mt-1 text-sm text-slate-600">
@@ -50,6 +51,7 @@ export function RunOverview({
           ) : null}
         </>
       )}
+      </div>
     </div>
   );
 }

@@ -1,35 +1,7 @@
-import { useEffect, useState } from 'react';
 import type { RunState } from '../api';
 import { formatCost, formatRelative } from '../lib/format';
 import { SprintPips } from './SprintPips';
 import { computeChipState, type ChipState } from './RunStatusChip';
-
-const FILTER_STORAGE_KEY = 'harness:runlist:filters';
-
-interface Filters {
-  showCompleted: boolean;
-  showAborted: boolean;
-}
-
-const DEFAULT_FILTERS: Filters = {
-  // Hide terminal-state runs by default — the sidebar is for live work.
-  showCompleted: false,
-  showAborted: false
-};
-
-function loadFilters(): Filters {
-  try {
-    const raw = localStorage.getItem(FILTER_STORAGE_KEY);
-    if (!raw) return DEFAULT_FILTERS;
-    const parsed = JSON.parse(raw);
-    return {
-      showCompleted: Boolean(parsed.showCompleted),
-      showAborted: Boolean(parsed.showAborted)
-    };
-  } catch {
-    return DEFAULT_FILTERS;
-  }
-}
 
 /**
  * Color of the left selection border when a row is active. Chip state colors
@@ -43,29 +15,6 @@ const SELECTED_BORDER: Record<ChipState, string> = {
   completed: 'border-emerald-500',
   aborted: 'border-slate-400'
 };
-
-type Preset = 'active' | 'completed' | 'aborted' | 'all';
-
-function filterPreset(f: Filters): Preset {
-  if (f.showCompleted && f.showAborted) return 'all';
-  if (f.showCompleted) return 'completed';
-  if (f.showAborted) return 'aborted';
-  return 'active';
-}
-
-function presetToFilters(p: Preset): Filters {
-  switch (p) {
-    case 'all':
-      return { showCompleted: true, showAborted: true };
-    case 'completed':
-      return { showCompleted: true, showAborted: false };
-    case 'aborted':
-      return { showCompleted: false, showAborted: true };
-    case 'active':
-    default:
-      return { showCompleted: false, showAborted: false };
-  }
-}
 
 function RunRow({
   r,
@@ -159,37 +108,26 @@ export function RunList({
   onSelect: (id: string) => void;
   onNew: () => void;
 }) {
-  const [filters, setFilters] = useState<Filters>(loadFilters);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(filters));
-    } catch {
-      /* localStorage may be unavailable (private mode); ignore */
-    }
-  }, [filters]);
-
-  const visibleRuns = runs.filter((r) => {
-    if (r.status === 'completed' && !filters.showCompleted) return false;
-    if (r.status === 'aborted' && !filters.showAborted) return false;
-    return true;
-  });
-
-  const hiddenCount = runs.length - visibleRuns.length;
+  // Sidebar is for active work only — completed and aborted runs are
+  // surfaced on the dashboard, grouped by activity. Hiding them here keeps
+  // the sidebar focused on what still needs attention.
+  const activeRuns = runs.filter(
+    (r) => r.status !== 'completed' && r.status !== 'aborted'
+  );
 
   // Counts at top of sidebar — quick "what needs attention" summary.
-  const liveCount = visibleRuns.filter((r) => r.dispatching).length;
-  const idleCount = visibleRuns.filter(
+  const liveCount = activeRuns.filter((r) => r.dispatching).length;
+  const idleCount = activeRuns.filter(
     (r) => r.status === 'in_progress' && r.next_role !== 'done' && !r.dispatching
   ).length;
-  const haltedCount = visibleRuns.filter((r) => r.status === 'halted').length;
+  const haltedCount = activeRuns.filter((r) => r.status === 'halted').length;
 
-  // Group visibleRuns by base_branch. Runs without base_branch go into the
+  // Group active runs by base_branch. Runs without base_branch go into the
   // ungrouped bucket and are rendered with no section header.
   const groupMap = new Map<string, RunState[]>();
   const ungrouped: RunState[] = [];
 
-  for (const r of visibleRuns) {
+  for (const r of activeRuns) {
     if (r.base_branch) {
       if (!groupMap.has(r.base_branch)) {
         groupMap.set(r.base_branch, []);
@@ -206,9 +144,7 @@ export function RunList({
         <div className="min-w-0">
           <div className="text-sm font-semibold uppercase tracking-wide text-blue-900">Runs</div>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
-            <span>
-              {visibleRuns.length} of {runs.length}
-            </span>
+            <span>{activeRuns.length} active</span>
             {liveCount > 0 ? (
               <span className="text-amber-600">
                 · <span className="font-semibold">{liveCount}</span> live
@@ -230,30 +166,12 @@ export function RunList({
           + New
         </button>
       </div>
-      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-1.5 text-[11px] text-slate-600">
-        <label className="flex items-center gap-2">
-          <span className="uppercase tracking-wide text-slate-500">Show</span>
-          <select
-            className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] text-slate-800 focus:border-blue-600 focus:outline-none"
-            value={filterPreset(filters)}
-            onChange={(e) => setFilters(presetToFilters(e.target.value as Preset))}
-          >
-            <option value="active">Active only</option>
-            <option value="completed">+ completed</option>
-            <option value="aborted">+ aborted</option>
-            <option value="all">All</option>
-          </select>
-        </label>
-        {hiddenCount > 0 ? (
-          <span className="text-slate-600">{hiddenCount} hidden</span>
-        ) : null}
-      </div>
       <div className="flex-1 overflow-y-auto">
-        {visibleRuns.length === 0 ? (
+        {activeRuns.length === 0 ? (
           <div className="px-4 py-6 text-sm text-slate-500">
             {runs.length === 0
               ? 'No runs yet. Click "+ New" to create one.'
-              : `All ${runs.length} runs are hidden by filters.`}
+              : 'No active runs. Open the dashboard to see completed and aborted runs.'}
           </div>
         ) : (
           <div>

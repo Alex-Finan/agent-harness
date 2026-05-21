@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api';
-import { Markdown } from './Markdown';
+import { api, type PendingComment } from '../api';
+import { CommentableMarkdown } from './CommentableMarkdown';
 
 /**
  * Renders overview.md — the intuitive, authoritative narrative for a run.
@@ -10,10 +10,14 @@ import { Markdown } from './Markdown';
  */
 export function OverviewView({
   runId,
-  overviewMd
+  overviewMd,
+  pendingComments = [],
+  onCommentFocus
 }: {
   runId: string;
   overviewMd: string;
+  pendingComments?: PendingComment[];
+  onCommentFocus?: (id: string) => void;
 }) {
   const [draft, setDraft] = useState(overviewMd);
   const [edit, setEdit] = useState(false);
@@ -75,7 +79,13 @@ export function OverviewView({
         />
       ) : (
         <div className="overflow-y-auto px-4 py-3">
-          <Markdown source={overviewMd} />
+          <CommentableMarkdown
+            source={overviewMd}
+            file="overview.md"
+            runId={runId}
+            comments={pendingComments.filter((c) => c.file === 'overview.md')}
+            onCommentFocus={onCommentFocus}
+          />
         </div>
       )}
     </div>

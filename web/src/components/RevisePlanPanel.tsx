@@ -15,11 +15,13 @@ import { diffPlans, bodyLineDelta, type PlanDiff } from '../lib/plan-diff';
 export function RevisePlanPanel({
   runId,
   planMd,
-  busy
+  busy,
+  pendingCommentCount = 0
 }: {
   runId: string;
   planMd: string | null;
   busy: boolean;
+  pendingCommentCount?: number;
 }) {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -47,7 +49,8 @@ export function RevisePlanPanel({
   }, [planMd]);
 
   async function submit() {
-    if (!message.trim() || loading) return;
+    if (loading) return;
+    if (!message.trim() && pendingCommentCount === 0) return;
     setLoading(true);
     setError(null);
     beforePlanRef.current = planMd ?? '';
@@ -99,6 +102,12 @@ export function RevisePlanPanel({
         disabled={disabled}
       />
 
+      {pendingCommentCount > 0 ? (
+        <div className="mt-1 text-[11px] text-amber-700">
+          {pendingCommentCount} pending comment{pendingCommentCount === 1 ? '' : 's'} will be sent with this revision
+        </div>
+      ) : null}
+
       <div className="mt-2 flex items-center justify-between">
         <span className="text-[11px] text-slate-500">
           ⌘/Ctrl + Enter to send · Enter for newline
@@ -106,7 +115,7 @@ export function RevisePlanPanel({
         <button
           className="btn btn-primary"
           onClick={() => void submit()}
-          disabled={disabled || !message.trim()}
+          disabled={disabled || (!message.trim() && pendingCommentCount === 0)}
         >
           {loading ? 'Revising…' : 'Revise plan'}
         </button>

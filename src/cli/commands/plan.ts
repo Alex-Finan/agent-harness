@@ -7,6 +7,11 @@ import { parseSprintsFromPlan } from '../../state/artifacts.js';
 import { buildPlannerInput } from '../../roles/planner.js';
 import { runSession } from '../../sdk/session.js';
 import { advance } from '../../state/transitions.js';
+import {
+  readPendingComments,
+  clearPendingComments,
+  formatCommentsForPlanner
+} from '../../state/pendingComments.js';
 
 export async function handlePlan(args: { runId: string }): Promise<void> {
   const run = await loadRun(args.runId);
@@ -54,13 +59,21 @@ export async function handlePlanRevise(args: {
     throw new Error(`Cannot revise plan: no plan.md exists yet. Run plan first.`);
   }
 
+  // Bundle any pending review comments into the planner prompt alongside the
+  // operator's free-text message. Comments are one-shot: cleared as soon as
+  // the planner session is dispatched so a retry doesn't double-send them.
+  const pending = await readPendingComments(run.state.run_id);
+  const composite =
+    formatCommentsForPlanner(pending, args.revisionMessage) ?? args.revisionMessage;
+  await clearPendingComments(run.state.run_id);
+
   const input = await buildPlannerInput({
     runId: run.state.run_id,
     targetRepo: run.state.target_repo,
     runDirAbs: runDir(run.state.run_id),
     taskMdAbs: taskPath(run.state.run_id),
     transcriptPath: path.join(logsDir(run.state.run_id), 'planner.log'),
-    revisionMessage: args.revisionMessage
+    revisionMessage: composite
   });
 
   const result = await runSession(input);
