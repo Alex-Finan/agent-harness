@@ -193,6 +193,11 @@ async function createWindow(): Promise<void> {
     }
   }
   await mainWindow.loadURL(serverHandle.url);
+
+  // Auto-open DevTools in dev mode so click/console issues are visible.
+  if (!app.isPackaged) {
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
+  }
 }
 
 app.whenReady().then(async () => {

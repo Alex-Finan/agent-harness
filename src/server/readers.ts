@@ -11,6 +11,7 @@ import {
 } from '../state/paths.js';
 import { parseVerdict } from '../state/artifacts.js';
 import { readPendingComments, type PendingComment } from '../state/pendingComments.js';
+import { readStack, type Stack } from '../state/stack.js';
 
 export interface SprintSnapshot {
   dirName: string;
@@ -32,6 +33,7 @@ export interface RunSnapshot {
   sprints: SprintSnapshot[];
   logFiles: string[];
   pendingComments: PendingComment[];
+  stack: Stack | null;
 }
 
 /**
@@ -151,13 +153,14 @@ export async function readRunSnapshot(runId: string): Promise<RunSnapshot> {
   const planMd = await readOrNull(planPath(runId));
   const sprints = await readSprints(runId);
   const pendingComments = await readPendingComments(runId);
+  const stack = await readStack(runId);
   let logFiles: string[] = [];
   try {
     logFiles = (await fs.readdir(logsDir(runId))).filter((f) => f.endsWith('.log')).sort();
   } catch {
     /* logs dir may not exist yet */
   }
-  return { taskMd, overviewMd, planMd, sprints, logFiles, pendingComments };
+  return { taskMd, overviewMd, planMd, sprints, logFiles, pendingComments, stack };
 }
 
 export async function readTranscript(runId: string, logName: string): Promise<{ lines: unknown[]; raw: string }> {

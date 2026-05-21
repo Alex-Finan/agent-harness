@@ -3,6 +3,7 @@ import { handleNext } from '../cli/commands/next.js';
 import { handleInit, type InitArgs, type InitResult } from '../cli/commands/init.js';
 import { handleAbort } from '../cli/commands/abort.js';
 import { loadRun, saveState } from '../state/run.js';
+import { findStackContaining, writeStack } from '../state/stack.js';
 import { EventBus } from './events.js';
 
 export interface DispatchHandle {
@@ -87,7 +88,72 @@ export class RunDispatcher {
           /* best-effort: if the run was purged we can't clear the flag */
         }
       }
+
+      // Chain advancement. If this run is part of a stack with
+      // auto_iterate_chain on, fire the next entry's auto-iterate on
+      // completion or halt the chain on failure. Done OUTSIDE the try/finally
+      // above so the auto_iterate flag is cleared on THIS run before the next
+      // run starts (avoids overlapping flags in case of restart).
+      await this.maybeAdvanceChain(runId);
     });
+  }
+
+  /**
+   * After a run finishes auto-iterate, look up whether it belongs to a stack
+   * chain. If yes and the run reached status=completed, start auto-iterate on
+   * the next ordered entry's runId. On halted/aborted, record the halt index
+   * in the stack so the operator can resume manually.
+   *
+   * Runs OUTSIDE the per-run lock so it can call back into the dispatcher to
+   * fire the next run.
+   */
+  private async maybeAdvanceChain(runId: string): Promise<void> {
+    let info: Awaited<ReturnType<typeof findStackContaining>>;
+    try {
+      info = await findStackContaining(runId);
+    } catch {
+      return;
+    }
+    if (!info) return;
+    if (!info.stack.auto_iterate_chain) return;
+
+    const finalStatus = await this.statusOf(runId);
+    if (finalStatus === 'completed') {
+      // Advance current_index and fire the next entry, if any.
+      const next = info.stack.ordered[info.index + 1];
+      if (!next || !next.runId) return; // chain has no next entry to fire
+      info.stack.current_index = info.index + 1;
+      try {
+        await writeStack(info.rootRunId, info.stack);
+      } catch {
+        /* non-fatal */
+      }
+      if (!this.isBusy(next.runId)) {
+        try {
+          await this.startAutoIterate(next.runId);
+        } catch {
+          /* surfaced as a dispatch error on next.runId */
+        }
+      }
+      return;
+    }
+    if (finalStatus === 'halted' || finalStatus === 'aborted') {
+      info.stack.halted_at = info.index;
+      try {
+        await writeStack(info.rootRunId, info.stack);
+      } catch {
+        /* non-fatal */
+      }
+    }
+  }
+
+  private async statusOf(runId: string): Promise<string | null> {
+    try {
+      const run = await loadRun(runId);
+      return run.state.status;
+    } catch {
+      return null;
+    }
   }
 
   private async start(

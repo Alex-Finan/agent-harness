@@ -209,7 +209,7 @@ export function App() {
               <PromptsPanel />
             </PageShell>
           ) : selected ? (
-            <RunDetail key={selected} runId={selected} />
+            <RunDetail key={selected} runId={selected} onSelectRun={selectRun} allRuns={runs} />
           ) : (
             <RunOverview runs={runs} onSelect={selectRun} />
           )}

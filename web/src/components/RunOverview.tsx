@@ -168,11 +168,11 @@ function RunTile({ run: r, onSelect }: { run: RunState; onSelect: (id: string) =
             nextRole={r.next_role}
             dispatching={!!r.dispatching}
           />
-          <span className="text-[10px] uppercase tracking-wide text-slate-500">
-            {totalSprints > 0
-              ? `${completedSprints}/${totalSprints} sprint${totalSprints === 1 ? '' : 's'} passed`
-              : 'planning'}
-          </span>
+          {totalSprints > 0 ? (
+            <span className="text-[10px] uppercase tracking-wide text-slate-500">
+              {`${completedSprints}/${totalSprints} sprint${totalSprints === 1 ? '' : 's'} passed`}
+            </span>
+          ) : null}
         </div>
         {r.cost_total_usd && r.cost_total_usd > 0 ? (
           <span className="text-xs tabular-nums text-emerald-600/80">

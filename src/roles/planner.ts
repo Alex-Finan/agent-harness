@@ -25,7 +25,8 @@ export async function buildPlannerInput(args: PlannerArgs): Promise<RunSessionIn
     ``,
     `Your working directory is the run directory: ${args.runDirAbs}`,
     `Write overview.md, plan.md, and sprints/NN-<slug>/contract.md files here.`,
-    `overview.md is the authoritative narrative; plan.md is the execution detail; contracts are per-sprint rubrics.`
+    `overview.md is the authoritative narrative; plan.md is the execution detail; contracts are per-sprint rubrics.`,
+    `If the task is too big for a single PR, ALSO write stack.json describing the recommended PR stack (see system prompt for the exact schema). Otherwise omit stack.json.`
   ];
   const prompt = args.revisionMessage
     ? [

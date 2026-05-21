@@ -3,6 +3,7 @@ import {
   api,
   openEventStream,
   type RunDetail as RunDetailT,
+  type RunState,
   type ServerEvent,
   type SprintSnapshot,
   type TranscriptMessage
@@ -11,6 +12,8 @@ import { PlanEditor } from './PlanEditor';
 import { OverviewView } from './OverviewView';
 import { ExpandablePanel } from './ExpandablePanel';
 import { PendingCommentsPanel } from './PendingCommentsPanel';
+import { StackPanel } from './StackPanel';
+import { RunProgressBar } from './RunProgressBar';
 import { SprintFocus, useDefaultFocus } from './SprintTimeline';
 import { PlanChat } from './PlanChat';
 import { RunStatusChip, computeChipState } from './RunStatusChip';
@@ -30,7 +33,15 @@ function isPlanningPhase(detail: RunDetailT): boolean {
   return !sprints.some((s) => s.contractMd !== null);
 }
 
-export function RunDetail({ runId }: { runId: string }) {
+export function RunDetail({
+  runId,
+  onSelectRun,
+  allRuns = []
+}: {
+  runId: string;
+  onSelectRun?: (id: string) => void;
+  allRuns?: RunState[];
+}) {
   const [detail, setDetail] = useState<RunDetailT | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [appendByLog, setAppendByLog] = useState<Record<string, TranscriptMessage[]>>({});
@@ -76,6 +87,10 @@ export function RunDetail({ runId }: { runId: string }) {
           prev
             ? { ...prev, snapshot: { ...prev.snapshot, pendingComments: event.comments } }
             : prev
+        );
+      } else if (event.type === 'stack') {
+        setDetail((prev) =>
+          prev ? { ...prev, snapshot: { ...prev.snapshot, stack: event.stack } } : prev
         );
       } else if (event.type === 'contract') {
         updateSprint(setDetail, event.runId, event.sprint, (s) => ({
@@ -308,6 +323,15 @@ export function RunDetail({ runId }: { runId: string }) {
         </div>
       </header>
       <div className="flex-1 overflow-y-auto p-4">
+        {detail.snapshot.stack ? (
+          <div className="mb-4">
+            <StackPanel
+              runId={detail.state.run_id}
+              stack={detail.snapshot.stack}
+              onOpenRun={onSelectRun}
+            />
+          </div>
+        ) : null}
         {isPlanningPhase(detail) ? (
           <PlanningView
             detail={detail}
@@ -316,7 +340,7 @@ export function RunDetail({ runId }: { runId: string }) {
             busy={busy}
           />
         ) : (
-          <SprintView detail={detail} />
+          <SprintView detail={detail} allRuns={allRuns} onSelectRun={onSelectRun} />
         )}
       </div>
       {sprintRows.length > 0 ? null : null}
@@ -371,14 +395,14 @@ function PlanningView({
         header={() => (
           <>
             <div className="flex items-center gap-1">
-              <TabButton
-                active={tab === 'overview'}
-                onClick={() => setTab('overview')}
-                disabled={overviewMd === null}
-                title={overviewMd === null ? 'No overview.md yet — pre-dates two-file convention' : undefined}
-              >
-                overview.md
-              </TabButton>
+              {overviewMd !== null ? (
+                <TabButton
+                  active={tab === 'overview'}
+                  onClick={() => setTab('overview')}
+                >
+                  overview.md
+                </TabButton>
+              ) : null}
               <TabButton active={tab === 'plan'} onClick={() => setTab('plan')}>
                 plan.md
               </TabButton>
@@ -546,9 +570,13 @@ function extractTaskPrompt(md: string | null): string | null {
 }
 
 function SprintView({
-  detail
+  detail,
+  allRuns,
+  onSelectRun
 }: {
   detail: RunDetailT;
+  allRuns: RunState[];
+  onSelectRun?: (id: string) => void;
 }) {
   const dispatchingActive = !!(detail.dispatching && !detail.dispatching.finished);
   const runId = detail.state.run_id;
@@ -575,23 +603,24 @@ function SprintView({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Plan + focused sprint detail side by side — the two anchors.
-          (No separate top-level pip strip — the plan view itself acts as
-          the sprint navigator, with each section showing phase + timing.) */}
+      {/* Top-of-view progress strip — appears once the planner has produced
+          contracts. Single-PR runs show their sprint pips; stacked runs show
+          one segment per PR with click-to-jump for siblings. */}
+      <RunProgressBar detail={detail} allRuns={allRuns} onSelectRun={onSelectRun} />
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <ExpandablePanel
           collapsedClassName="panel flex max-h-[70vh] flex-col overflow-hidden"
           header={() => (
             <>
               <div className="flex items-center gap-1">
-                <TabButton
-                  active={tab === 'overview'}
-                  onClick={() => setTab('overview')}
-                  disabled={overviewMd === null}
-                  title={overviewMd === null ? 'No overview.md yet — pre-dates two-file convention' : undefined}
-                >
-                  overview.md
-                </TabButton>
+                {overviewMd !== null ? (
+                  <TabButton
+                    active={tab === 'overview'}
+                    onClick={() => setTab('overview')}
+                  >
+                    overview.md
+                  </TabButton>
+                ) : null}
                 <TabButton active={tab === 'plan'} onClick={() => setTab('plan')}>
                   plan.md
                 </TabButton>

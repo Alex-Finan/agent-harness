@@ -61,6 +61,21 @@ export interface PendingComment {
   created_at: string;
 }
 
+export interface StackEntry {
+  slug: string;
+  base: string;
+  branch: string;
+  task: string;
+  runId?: string;
+}
+
+export interface Stack {
+  ordered: StackEntry[];
+  current_index: number;
+  auto_iterate_chain: boolean;
+  halted_at?: number;
+}
+
 export interface RunSnapshot {
   taskMd: string | null;
   overviewMd: string | null;
@@ -68,6 +83,7 @@ export interface RunSnapshot {
   sprints: SprintSnapshot[];
   logFiles: string[];
   pendingComments: PendingComment[];
+  stack: Stack | null;
 }
 
 export interface RoleCost {
@@ -216,7 +232,24 @@ export const api = {
     }),
 
   deletePendingComment: (id: string, cid: string) =>
-    http<{ ok: boolean }>(`/api/runs/${id}/pending-comments/${cid}`, { method: 'DELETE' })
+    http<{ ok: boolean }>(`/api/runs/${id}/pending-comments/${cid}`, { method: 'DELETE' }),
+
+  getStack: (id: string) => http<Stack>(`/api/runs/${id}/stack`),
+
+  patchStackEntry: (id: string, index: number, body: Partial<Pick<StackEntry, 'slug' | 'base' | 'branch' | 'task'>>) =>
+    http<{ ok: boolean; entry: StackEntry }>(`/api/runs/${id}/stack/${index}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body)
+    }),
+
+  spawnStack: (id: string, autoIterate: boolean) =>
+    http<{ spawned: number; entries: { index: number; runId: string; branch: string }[]; autoIterateChain: boolean }>(
+      `/api/runs/${id}/stack/spawn`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ autoIterate })
+      }
+    )
 };
 
 export interface ApiKeyStatus {
@@ -261,6 +294,7 @@ export type ServerEvent =
   | { type: 'plan'; runId: string; planMd: string }
   | { type: 'overview'; runId: string; overviewMd: string }
   | { type: 'pending_comments'; runId: string; comments: PendingComment[] }
+  | { type: 'stack'; runId: string; stack: Stack | null }
   | { type: 'contract'; runId: string; sprint: string; contractMd: string }
   | { type: 'output'; runId: string; sprint: string; outputMd: string }
   | { type: 'verdict'; runId: string; sprint: string; verdictMd: string }

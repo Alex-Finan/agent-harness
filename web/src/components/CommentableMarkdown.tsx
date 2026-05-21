@@ -113,11 +113,32 @@ export function CommentableMarkdown({
       }
     }
 
+    function onScroll() {
+      // Any scroll invalidates the captured viewport rect — drop the pill so
+      // it doesn't drift over unrelated UI like tab strips or page headers.
+      setPending(null);
+    }
+    function onMouseDownAnywhere(e: MouseEvent) {
+      if (!container) return;
+      const target = e.target as Node | null;
+      // If the user mousedowns outside the markdown body AND not on the pill
+      // itself, drop the pending state. Pill is rendered as a sibling div in
+      // the relative wrapper, so we test against the container's parent.
+      const wrapper = container.parentElement;
+      if (!wrapper) return;
+      if (target && wrapper.contains(target)) return;
+      setPending(null);
+    }
+
     document.addEventListener('mouseup', onMouseUp);
     document.addEventListener('selectionchange', onSelectionChange);
+    document.addEventListener('mousedown', onMouseDownAnywhere, true);
+    window.addEventListener('scroll', onScroll, true);
     return () => {
       document.removeEventListener('mouseup', onMouseUp);
       document.removeEventListener('selectionchange', onSelectionChange);
+      document.removeEventListener('mousedown', onMouseDownAnywhere, true);
+      window.removeEventListener('scroll', onScroll, true);
     };
   }, [source, effectiveAnchorSource]);
 

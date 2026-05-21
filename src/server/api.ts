@@ -16,6 +16,8 @@ import {
   isValidCommentFile,
   type PendingComment
 } from '../state/pendingComments.js';
+import { readStack, writeStack, type Stack, type StackEntry } from '../state/stack.js';
+import { handleInit } from '../cli/commands/init.js';
 import { readAllPrompts, writePrompt, isPromptName } from './prompts.js';
 import { getApiKeyStatus, setApiKey, clearApiKey } from '../state/config.js';
 import { computeRunCost } from './cost.js';
@@ -79,6 +81,17 @@ const NewCommentBody = z.object({
 
 const PatchCommentBody = z.object({
   body: z.string().min(1)
+});
+
+const PatchStackEntryBody = z.object({
+  slug: z.string().min(1).optional(),
+  base: z.string().min(1).optional(),
+  branch: z.string().min(1).optional(),
+  task: z.string().min(1).optional()
+});
+
+const SpawnStackBody = z.object({
+  autoIterate: z.boolean().default(false)
 });
 
 export async function buildServer(opts: BuildServerOptions = {}): Promise<{
@@ -359,6 +372,117 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
     }
     await writePendingComments(id, next);
     return { ok: true };
+  });
+
+  // -------------------- Stack (multi-PR plan, written by the planner) --------------------
+  // The planner writes stack.json at the run root when it decides the task
+  // spans multiple PRs. Operator can edit unspawned entries here, then POST
+  // /spawn to materialize the follow-up runs as worktrees stacked on each
+  // other. With autoIterate=true the chain orchestrator also auto-iterates
+  // each follow-up as its predecessor reaches status=completed.
+  app.get('/api/runs/:id/stack', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const stack = await readStack(id);
+    if (stack === null) {
+      reply.code(404);
+      return { error: 'no stack.json for this run' };
+    }
+    return stack;
+  });
+
+  app.patch('/api/runs/:id/stack/:index', async (req, reply) => {
+    const { id, index: rawIndex } = req.params as { id: string; index: string };
+    const index = parseInt(rawIndex, 10);
+    if (!Number.isFinite(index) || index < 0) {
+      reply.code(400);
+      return { error: 'index must be a non-negative integer' };
+    }
+    const parsed = PatchStackEntryBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid body', issues: parsed.error.issues };
+    }
+    const stack = await readStack(id);
+    if (stack === null) {
+      reply.code(404);
+      return { error: 'no stack.json for this run' };
+    }
+    const entry = stack.ordered[index];
+    if (!entry) {
+      reply.code(404);
+      return { error: 'index out of range' };
+    }
+    if (entry.runId) {
+      reply.code(409);
+      return { error: 'entry already spawned; edit the spawned run directly' };
+    }
+    stack.ordered[index] = { ...entry, ...parsed.data };
+    await writeStack(id, stack);
+    return { ok: true, entry: stack.ordered[index] };
+  });
+
+  app.post('/api/runs/:id/stack/spawn', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const parsed = SpawnStackBody.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid body', issues: parsed.error.issues };
+    }
+    const stack = await readStack(id);
+    if (stack === null) {
+      reply.code(404);
+      return { error: 'no stack.json for this run' };
+    }
+    const root = await loadRun(id);
+    // Spawned runs init off the operator's *origin* repo (the canonical
+    // checkout). If the root run was itself a worktree, its origin_repo is
+    // already the canonical checkout; otherwise we fall back to target_repo.
+    const originRepo = root.state.origin_repo ?? root.state.target_repo;
+
+    const spawned: { index: number; runId: string; branch: string }[] = [];
+    for (let i = 1; i < stack.ordered.length; i++) {
+      const entry = stack.ordered[i];
+      if (entry.runId) continue; // idempotent re-run
+      try {
+        const result = await handleInit({
+          repo: originRepo,
+          task: entry.task,
+          maxRetries: 3,
+          base: entry.base,
+          branch: entry.branch
+        });
+        stack.ordered[i] = { ...entry, runId: result.runId };
+        spawned.push({ index: i, runId: result.runId, branch: result.branch ?? entry.branch });
+        // Persist after each successful spawn so a mid-loop failure doesn't
+        // lose track of what we already created.
+        await writeStack(id, stack);
+      } catch (e) {
+        reply.code(500);
+        return {
+          error: `spawn failed at index ${i}: ${(e as Error).message}`,
+          spawnedBeforeFailure: spawned
+        };
+      }
+    }
+
+    if (parsed.data.autoIterate) {
+      stack.auto_iterate_chain = true;
+      stack.halted_at = undefined;
+      await writeStack(id, stack);
+      // If the root run is already completed, prime the first follow-up
+      // immediately. Otherwise the orchestrator fires it when root finishes.
+      const rootStatus = (await loadRun(id)).state.status;
+      const nextEntry = stack.ordered[stack.current_index + 1];
+      if (rootStatus === 'completed' && nextEntry?.runId && !dispatcher.isBusy(nextEntry.runId)) {
+        await dispatcher.startAutoIterate(nextEntry.runId);
+      }
+    }
+
+    return {
+      spawned: spawned.length,
+      entries: spawned,
+      autoIterateChain: !!stack.auto_iterate_chain
+    };
   });
 
   app.get('/api/runs/:id/transcripts/:log', async (req, reply) => {

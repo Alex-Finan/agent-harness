@@ -50,7 +50,24 @@ If the task as written would produce a single coherent PR, proceed normally. Wri
 If the task as written is too big or spans multiple natural PRs:
 1. Do NOT silently cram it into one branch with many sprints.
 2. In the **Scope check** section, explicitly recommend a split: list the 2-5 PRs you'd carve the task into, in dependency order, with one sentence per PR explaining its scope. Each entry should name a base branch for that PR (the previous PR's branch, or `develop`/`main` for the first).
-3. Then proceed to plan ONLY the FIRST PR in that split (the one with the deepest base). The user will read the recommendation, decide whether to accept it, abort this run if they want to restructure, and use the rest of your recommended split as task descriptions for follow-up `harness init --base <prev>` runs.
+3. Also write `stack.json` at the run root with the structured stack so the harness can spawn the follow-up runs for the operator. Schema:
+
+```json
+{
+  "ordered": [
+    {"slug":"<kebab>", "base":"<base branch>", "branch":"<branch for this PR>", "task":"<4-8 sentence description suitable as the next run's task.md>"},
+    ...
+  ],
+  "current_index": 0,
+  "auto_iterate_chain": false
+}
+```
+
+`ordered[0]` MUST describe the work this current run is planning. `current_index` is 0 (this is the first / current run). `auto_iterate_chain` is always false from your side — the operator turns it on at spawn time. The operator's UI shows the stack, lets them edit task descriptions, and spawns follow-up runs (`harness init --base <prev>` is invoked for each).
+
+4. Then proceed to plan ONLY the FIRST PR in that split (the one with the deepest base) — the rest is for the spawned follow-up runs to plan when their time comes.
+
+When the task fits in a single PR, do NOT write stack.json. Its presence is the signal that this is a multi-PR plan.
 
 Sprint sizing inside one PR is a different question. Sprints are verifiable checkpoints during execution — schema first, then logic, then tests — and they all stack additively on the same branch. Do not draw sprint boundaries based on what "would be a separate PR."
 
