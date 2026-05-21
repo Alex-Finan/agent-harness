@@ -117,8 +117,8 @@ export function RepoPicker({
       </div>
 
       {open ? (
-        <div className="absolute left-0 right-0 z-40 mt-1 max-h-96 overflow-hidden rounded border border-slate-700 bg-slate-900 shadow-xl">
-          <div className="flex items-center gap-2 border-b border-slate-800 px-3 py-2">
+        <div className="absolute left-0 right-0 z-40 mt-1 max-h-96 overflow-hidden rounded border border-slate-300 bg-white shadow-xl">
+          <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
             <input
               autoFocus
               className="input flex-1 text-sm"
@@ -132,7 +132,7 @@ export function RepoPicker({
             />
             <button
               type="button"
-              className="text-xs text-slate-400 hover:text-slate-200"
+              className="text-xs text-slate-600 hover:text-slate-800"
               onClick={() => void load(true)}
               title="Refresh from gh CLI"
             >
@@ -140,12 +140,12 @@ export function RepoPicker({
             </button>
           </div>
           {!ghAvailable ? (
-            <div className="border-b border-amber-900/40 bg-amber-950/40 px-3 py-1.5 text-[11px] text-amber-300">
+            <div className="border-b border-amber-900/40 bg-amber-950/40 px-3 py-1.5 text-[11px] text-amber-700">
               gh CLI not available or unauthed — showing local clones only
             </div>
           ) : null}
           {error ? (
-            <div className="border-b border-rose-900/40 bg-rose-950/40 px-3 py-1.5 text-[11px] text-rose-300">
+            <div className="border-b border-rose-900/40 bg-rose-50 px-3 py-1.5 text-[11px] text-rose-600">
               {error}
             </div>
           ) : null}
@@ -157,7 +157,7 @@ export function RepoPicker({
                 {repos === null ? 'Loading…' : 'No repos match.'}
               </div>
             ) : (
-              <ul className="divide-y divide-slate-800">
+              <ul className="divide-y divide-slate-200">
                 {filtered.map((r, i) => {
                   const usable = r.localPath != null;
                   const highlighted = i === highlight;
@@ -166,25 +166,25 @@ export function RepoPicker({
                       key={`${r.slug}-${r.source}`}
                       className={`px-3 py-2 ${
                         usable ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'
-                      } ${highlighted && usable ? 'bg-slate-800' : 'hover:bg-slate-800/60'}`}
+                      } ${highlighted && usable ? 'bg-slate-100' : 'hover:bg-slate-100/60'}`}
                       onMouseEnter={() => setHighlight(i)}
                       onClick={() => pick(r)}
                     >
                       <div className="flex items-center gap-2">
-                        <span className="text-sm text-slate-100">{r.slug}</span>
+                        <span className="text-sm text-slate-900">{r.slug}</span>
                         {r.localPath ? (
-                          <span className="badge bg-emerald-900/60 text-emerald-300">local</span>
+                          <span className="badge bg-emerald-900/60 text-emerald-700">local</span>
                         ) : (
-                          <span className="badge bg-slate-800 text-slate-500">not cloned</span>
+                          <span className="badge bg-slate-100 text-slate-500">not cloned</span>
                         )}
                         {r.source === 'local-only' ? (
-                          <span className="badge bg-slate-800 text-slate-400" title="Found locally but not in gh repo list">
+                          <span className="badge bg-slate-100 text-slate-600" title="Found locally but not in gh repo list">
                             local-only
                           </span>
                         ) : null}
                       </div>
                       {r.description ? (
-                        <div className="mt-0.5 truncate text-xs text-slate-400" title={r.description}>
+                        <div className="mt-0.5 truncate text-xs text-slate-600" title={r.description}>
                           {r.description}
                         </div>
                       ) : null}
@@ -203,7 +203,7 @@ export function RepoPicker({
               </ul>
             )}
           </div>
-          <div className="border-t border-slate-800 px-3 py-1.5 text-[10px] text-slate-500">
+          <div className="border-t border-slate-200 px-3 py-1.5 text-[10px] text-slate-500">
             {repos ? `${repos.length} repos` : ''} · ↑↓ to navigate · Enter to select · esc to close
           </div>
         </div>

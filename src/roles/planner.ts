@@ -24,17 +24,20 @@ export async function buildPlannerInput(args: PlannerArgs): Promise<RunSessionIn
     `Task description: ${args.taskMdAbs}`,
     ``,
     `Your working directory is the run directory: ${args.runDirAbs}`,
-    `Write plan.md and sprints/NN-<slug>/contract.md files here.`
+    `Write overview.md, plan.md, and sprints/NN-<slug>/contract.md files here.`,
+    `overview.md is the authoritative narrative; plan.md is the execution detail; contracts are per-sprint rubrics.`
   ];
   const prompt = args.revisionMessage
     ? [
         ...baseLines,
         ``,
-        `An existing plan.md is already present in your working directory.`,
+        `An existing overview.md and plan.md may already be present in your working directory.`,
         `The operator has requested the following revisions — apply them by`,
-        `editing plan.md (and any sprints/NN-<slug>/contract.md files that`,
-        `must change to stay consistent). Do not start from scratch unless`,
-        `the request demands it. Keep sprint numbering contiguous.`,
+        `editing overview.md and/or plan.md (and any sprints/NN-<slug>/contract.md`,
+        `files that must change to stay consistent). Remember: overview.md is`,
+        `authoritative — if the revision changes the goal or approach, edit the`,
+        `overview first and then bring plan.md in line. Do not start from scratch`,
+        `unless the request demands it. Keep sprint numbering contiguous.`,
         ``,
         `Operator revision request:`,
         args.revisionMessage

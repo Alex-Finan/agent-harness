@@ -64,7 +64,7 @@ export function TranscriptStream({
 
   return (
     <div className="panel flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-slate-800 px-4 py-2">
+      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
         <div className="text-sm font-semibold">live transcript</div>
         <select
           className="input max-w-xs"
@@ -101,8 +101,8 @@ export function TranscriptStream({
 function TranscriptItem({ message }: { message: TranscriptMessage }) {
   if (message.type === 'system') {
     return (
-      <li className="rounded border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-slate-400">
-        <span className="font-semibold text-slate-300">system</span>
+      <li className="rounded border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+        <span className="font-semibold text-slate-700">system</span>
         {message.subtype ? <span className="ml-2 text-slate-500">{String(message.subtype)}</span> : null}
       </li>
     );
@@ -113,25 +113,25 @@ function TranscriptItem({ message }: { message: TranscriptMessage }) {
     const content = m.message?.content ?? [];
     return (
       <li className="rounded border border-emerald-900/60 bg-emerald-900/10 px-3 py-2">
-        <div className="mb-1 text-xs font-semibold text-emerald-400">assistant</div>
+        <div className="mb-1 text-xs font-semibold text-emerald-600">assistant</div>
         <div className="space-y-2">
           {content.map((c, i) => {
             if (c.type === 'text') {
               return (
-                <div key={i} className="whitespace-pre-wrap text-sm text-slate-100">
+                <div key={i} className="whitespace-pre-wrap text-sm text-slate-900">
                   {c.text}
                 </div>
               );
             }
             if (c.type === 'tool_use') {
               return (
-                <div key={i} className="rounded bg-slate-950 px-2 py-1 font-mono text-xs text-sky-300">
+                <div key={i} className="rounded bg-white px-2 py-1 font-mono text-xs text-sky-700">
                   ↪ {c.name}({truncate(JSON.stringify(c.input), 240)})
                 </div>
               );
             }
             return (
-              <div key={i} className="text-xs text-slate-400">
+              <div key={i} className="text-xs text-slate-600">
                 ({c.type})
               </div>
             );
@@ -145,11 +145,11 @@ function TranscriptItem({ message }: { message: TranscriptMessage }) {
     const m = message as { message?: { content?: Array<{ type: string; content?: unknown }> } };
     const content = m.message?.content ?? [];
     return (
-      <li className="rounded border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs">
-        <div className="mb-1 font-semibold text-slate-400">tool result</div>
+      <li className="rounded border border-slate-200 bg-white/60 px-3 py-2 text-xs">
+        <div className="mb-1 font-semibold text-slate-600">tool result</div>
         <div className="space-y-1">
           {content.map((c, i) => (
-            <div key={i} className="font-mono text-slate-300">
+            <div key={i} className="font-mono text-slate-700">
               {truncate(JSON.stringify(c.content ?? c), 600)}
             </div>
           ))}
@@ -165,8 +165,8 @@ function TranscriptItem({ message }: { message: TranscriptMessage }) {
       <li
         className={`rounded border px-3 py-2 text-sm ${
           ok
-            ? 'border-emerald-700 bg-emerald-900/40 text-emerald-200'
-            : 'border-rose-700 bg-rose-900/40 text-rose-200'
+            ? 'border-emerald-400 bg-emerald-50 text-emerald-800'
+            : 'border-rose-300 bg-rose-50 text-rose-700'
         }`}
       >
         <div className="mb-1 font-semibold">result · {m.subtype}</div>
@@ -181,7 +181,7 @@ function TranscriptItem({ message }: { message: TranscriptMessage }) {
   if (message.type === 'raw') {
     const m = message as { text: string };
     return (
-      <li className="rounded border border-slate-800 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-400">
+      <li className="rounded border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-600">
         {m.text}
       </li>
     );

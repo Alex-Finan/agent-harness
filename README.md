@@ -22,7 +22,24 @@ ln -sf "$PWD/bin/harness" /usr/local/bin/harness    # optional
 npm run build:web
 ```
 
-Set `ANTHROPIC_API_KEY` in your env.
+Set `ANTHROPIC_API_KEY` in your env — or save it from the in-app **Settings** panel
+(persists to `~/.agent-harness/config.json` with `0600` perms; the env var still
+wins when set, so existing shell setups keep working).
+
+## Desktop app
+
+A native Electron shell that wraps the server + UI in a real desktop window
+(no `harness serve` + browser dance — same model as Conductor):
+
+```bash
+npm install                # one-time, root deps
+npm run desktop            # dev: builds + launches the Electron window
+npm run desktop:dist:mac   # produce a signed-ready .dmg in desktop/release/
+```
+
+Under the hood, Electron spawns the harness Fastify server on an ephemeral
+loopback port and points a `BrowserWindow` at it. Native menus include
+**File → New Run** and **File → Open ~/.agent-harness**.
 
 ## Web UI
 

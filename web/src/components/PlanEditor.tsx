@@ -36,7 +36,7 @@ export function PlanEditor({
 
   if (planMd === null) {
     return (
-      <div className="panel px-4 py-6 text-sm text-slate-400">
+      <div className="panel px-4 py-6 text-sm text-slate-600">
         No plan yet. Run the planner to generate <code>plan.md</code>.
       </div>
     );
@@ -44,7 +44,7 @@ export function PlanEditor({
 
   return (
     <div className="panel">
-      <div className="flex items-center justify-between border-b border-slate-800 px-4 py-2">
+      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
         <div className="text-sm font-semibold">plan.md</div>
         <div className="flex gap-2">
           {edit ? (
@@ -67,7 +67,7 @@ export function PlanEditor({
         </div>
       </div>
       {error ? (
-        <div className="m-3 rounded border border-rose-700 bg-rose-900/40 px-3 py-2 text-sm text-rose-200">
+        <div className="m-3 rounded border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-700">
           {error}
         </div>
       ) : null}

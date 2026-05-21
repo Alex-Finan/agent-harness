@@ -1,0 +1,72 @@
+{
+  "name": "agent-harness-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron desktop shell for agent-harness — runs the harness server in-process and opens a native window pointed at the React UI.",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "npm run build && electron .",
+    "start": "electron .",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.30",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.8.3"
+  },
+  "build": {
+    "appId": "ai.anthropic.agent-harness",
+    "productName": "Agent Harness",
+    "asar": true,
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "!node_modules/**/{CHANGELOG.md,README.md,readme.md}",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist",
+        "to": "harness/dist"
+      },
+      {
+        "from": "../web/dist",
+        "to": "harness/web/dist"
+      },
+      {
+        "from": "../package.json",
+        "to": "harness/package.json"
+      },
+      {
+        "from": "../node_modules",
+        "to": "harness/node_modules",
+        "filter": [
+          "**/*",
+          "!**/{test,tests,__tests__,docs,doc,example,examples}/**",
+          "!**/*.map",
+          "!**/*.md"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] }
+      ]
+    },
+    "linux": {
+      "target": ["AppImage"]
+    },
+    "win": {
+      "target": ["nsis"]
+    }
+  }
+}

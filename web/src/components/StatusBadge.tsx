@@ -19,6 +19,6 @@ export function StatusBadge({ status }: { status: RunState['status'] }) {
 }
 
 export function VerdictBadge({ verdict }: { verdict: 'PASS' | 'FAIL' | null }) {
-  if (verdict === null) return <span className="badge border border-slate-700 bg-slate-800 text-slate-400">—</span>;
+  if (verdict === null) return <span className="badge border border-slate-300 bg-slate-100 text-slate-600">—</span>;
   return <span className={`badge ${verdict === 'PASS' ? 'badge-pass' : 'badge-fail'}`}>{verdict}</span>;
 }

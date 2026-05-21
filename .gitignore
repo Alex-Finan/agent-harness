@@ -2,6 +2,9 @@ node_modules
 dist
 web/dist
 web/node_modules
+desktop/dist
+desktop/release
+desktop/node_modules
 *.tsbuildinfo
 .env
 .DS_Store

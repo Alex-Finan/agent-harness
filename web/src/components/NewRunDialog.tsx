@@ -48,9 +48,9 @@ export function NewRunDialog({
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60 p-4">
       <div className="panel w-full max-w-2xl">
-        <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
           <div className="text-sm font-semibold">Start a new run</div>
-          <button className="text-slate-400 hover:text-slate-200" onClick={onClose}>
+          <button className="text-slate-600 hover:text-slate-800" onClick={onClose}>
             ✕
           </button>
         </div>
@@ -103,7 +103,7 @@ export function NewRunDialog({
               />
             </div>
           </div>
-          <label className="flex items-center gap-2 text-sm text-slate-300">
+          <label className="flex items-center gap-2 text-sm text-slate-700">
             <input
               type="checkbox"
               checked={autoIterate}
@@ -112,7 +112,7 @@ export function NewRunDialog({
             Auto-iterate (planner → all sprints) once created
           </label>
           {error ? (
-            <div className="rounded border border-rose-700 bg-rose-900/40 px-3 py-2 text-sm text-rose-200">
+            <div className="rounded border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-700">
               {error}
             </div>
           ) : null}

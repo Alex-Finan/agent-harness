@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { RunState } from '../api';
-import { StatusBadge } from './StatusBadge';
 import { formatCost, formatRelative } from '../lib/format';
+import { SprintPips } from './SprintPips';
+import { computeChipState, type ChipState } from './RunStatusChip';
 
 const FILTER_STORAGE_KEY = 'harness:runlist:filters';
 
@@ -30,6 +31,42 @@ function loadFilters(): Filters {
   }
 }
 
+/**
+ * Color of the left selection border when a row is active. Chip state colors
+ * carry status; the selected border picks up the matching tone instead of
+ * a separate status dot.
+ */
+const SELECTED_BORDER: Record<ChipState, string> = {
+  running: 'border-amber-500',
+  idle: 'border-yellow-500',
+  halted: 'border-rose-500',
+  completed: 'border-emerald-500',
+  aborted: 'border-slate-400'
+};
+
+type Preset = 'active' | 'completed' | 'aborted' | 'all';
+
+function filterPreset(f: Filters): Preset {
+  if (f.showCompleted && f.showAborted) return 'all';
+  if (f.showCompleted) return 'completed';
+  if (f.showAborted) return 'aborted';
+  return 'active';
+}
+
+function presetToFilters(p: Preset): Filters {
+  switch (p) {
+    case 'all':
+      return { showCompleted: true, showAborted: true };
+    case 'completed':
+      return { showCompleted: true, showAborted: false };
+    case 'aborted':
+      return { showCompleted: false, showAborted: true };
+    case 'active':
+    default:
+      return { showCompleted: false, showAborted: false };
+  }
+}
+
 function RunRow({
   r,
   selected,
@@ -39,55 +76,73 @@ function RunRow({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const isIdle =
-    r.status === 'in_progress' &&
-    r.next_role !== 'done' &&
-    !r.dispatching;
+  const chip = computeChipState({
+    status: r.status,
+    nextRole: r.next_role,
+    dispatchingActive: !!r.dispatching
+  });
+  const isLive = chip === 'running';
+  const totalSprints = Math.max(r.total_sprints, r.sprint_pips?.length ?? 0);
 
   return (
     <li
-      className={`cursor-pointer px-4 py-3 transition ${selected ? 'bg-slate-800/60' : 'hover:bg-slate-900'}`}
+      className={`group cursor-pointer border-l-[3px] px-3 py-2 transition ${
+        selected
+          ? 'border-blue-700 bg-blue-50/60'
+          : 'border-transparent hover:bg-white'
+      }`}
       onClick={onSelect}
+      title={r.run_id}
     >
-      <div className="mb-1 flex items-center gap-2">
-        <StatusBadge status={r.status} />
-        {r.status === 'halted' && (
-          <span className="animate-pulse rounded border border-red-700 bg-red-900/60 px-1.5 py-0.5 text-[10px] font-semibold text-red-400">
-            FAIL
-          </span>
-        )}
-        {r.dispatching ? (
-          <span className="badge badge-running animate-pulse">{r.dispatching}…</span>
-        ) : null}
-        {isIdle && (
-          <span className="rounded border border-yellow-700 bg-yellow-900/40 px-1.5 py-0.5 text-[10px] font-semibold text-yellow-400">
-            needs action
-          </span>
-        )}
-        <span className="ml-auto text-xs text-slate-500">{formatCost(r.cost_total_usd)}</span>
-      </div>
-      <div className="truncate text-sm font-medium text-slate-100" title={r.task_summary}>
-        {r.task_summary || '(no task summary)'}
-      </div>
-      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-        <span>
-          sprint {r.current_sprint}/{r.total_sprints || '?'}
+      {/* Row 1: task summary + age. Status comes through the row's left
+          border color and the pip strip in row 2 — no separate dot. */}
+      <div className="flex items-center gap-2">
+        <span
+          className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900"
+          title={r.task_summary}
+        >
+          {r.task_summary || '(no task summary)'}
         </span>
-        <span>·</span>
-        <span>{r.next_role}</span>
-        <span>·</span>
-        <span>{formatRelative(r.updated_at)}</span>
-        {r.base_branch && (
-          <>
-            <span>·</span>
-            <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+        <span className="shrink-0 text-[10px] tabular-nums text-slate-500">
+          {formatRelative(r.updated_at)}
+        </span>
+      </div>
+      {/* Row 2: sprint pips + role label + branch + cost. The pip strip
+          carries the count; no separate "3/5". */}
+      <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500">
+        <SprintPips
+          pips={r.sprint_pips ?? []}
+          totalSprints={totalSprints}
+          currentSprint={r.current_sprint}
+          nextRole={r.next_role}
+          dispatching={isLive}
+        />
+        <span className="truncate" title={`next: ${r.next_role}`}>
+          {chip === 'halted'
+            ? 'failed'
+            : chip === 'completed'
+              ? 'done'
+              : chip === 'aborted'
+                ? 'aborted'
+                : isLive
+                  ? `${r.dispatching}…`
+                  : r.next_role}
+        </span>
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          {r.base_branch ? (
+            <span
+              className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[10px] text-slate-600"
+              title={`base branch: ${r.base_branch}`}
+            >
               ⎇ {r.base_branch}
             </span>
-          </>
-        )}
-      </div>
-      <div className="mt-1 truncate font-mono text-[10px] text-slate-600" title={r.run_id}>
-        {r.run_id}
+          ) : null}
+          {r.cost_total_usd && r.cost_total_usd > 0 ? (
+            <span className="tabular-nums text-emerald-600/80">
+              {formatCost(r.cost_total_usd)}
+            </span>
+          ) : null}
+        </span>
       </div>
     </li>
   );
@@ -122,6 +177,13 @@ export function RunList({
 
   const hiddenCount = runs.length - visibleRuns.length;
 
+  // Counts at top of sidebar — quick "what needs attention" summary.
+  const liveCount = visibleRuns.filter((r) => r.dispatching).length;
+  const idleCount = visibleRuns.filter(
+    (r) => r.status === 'in_progress' && r.next_role !== 'done' && !r.dispatching
+  ).length;
+  const haltedCount = visibleRuns.filter((r) => r.status === 'halted').length;
+
   // Group visibleRuns by base_branch. Runs without base_branch go into the
   // ungrouped bucket and are rendered with no section header.
   const groupMap = new Map<string, RunState[]>();
@@ -140,43 +202,57 @@ export function RunList({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-        <div>
-          <div className="text-sm font-semibold text-slate-100">runs</div>
-          <div className="text-xs text-slate-500">
-            {visibleRuns.length} of {runs.length}
-            {hiddenCount > 0 ? <span className="text-slate-600"> · {hiddenCount} hidden</span> : null}
+      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold uppercase tracking-wide text-blue-900">Runs</div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
+            <span>
+              {visibleRuns.length} of {runs.length}
+            </span>
+            {liveCount > 0 ? (
+              <span className="text-amber-600">
+                · <span className="font-semibold">{liveCount}</span> live
+              </span>
+            ) : null}
+            {idleCount > 0 ? (
+              <span className="text-yellow-700">
+                · <span className="font-semibold">{idleCount}</span> waiting
+              </span>
+            ) : null}
+            {haltedCount > 0 ? (
+              <span className="text-rose-500">
+                · <span className="font-semibold">{haltedCount}</span> halted
+              </span>
+            ) : null}
           </div>
         </div>
-        <button className="btn btn-primary" onClick={onNew}>
-          + New run
+        <button className="btn btn-primary shrink-0" onClick={onNew}>
+          + New
         </button>
       </div>
-      <div className="flex items-center gap-3 border-b border-slate-800 px-4 py-2 text-xs text-slate-400">
-        <label className="flex cursor-pointer items-center gap-1.5 hover:text-slate-200">
-          <input
-            type="checkbox"
-            className="h-3 w-3 cursor-pointer accent-emerald-500"
-            checked={filters.showCompleted}
-            onChange={(e) => setFilters((f) => ({ ...f, showCompleted: e.target.checked }))}
-          />
-          <span>completed</span>
+      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-1.5 text-[11px] text-slate-600">
+        <label className="flex items-center gap-2">
+          <span className="uppercase tracking-wide text-slate-500">Show</span>
+          <select
+            className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] text-slate-800 focus:border-blue-600 focus:outline-none"
+            value={filterPreset(filters)}
+            onChange={(e) => setFilters(presetToFilters(e.target.value as Preset))}
+          >
+            <option value="active">Active only</option>
+            <option value="completed">+ completed</option>
+            <option value="aborted">+ aborted</option>
+            <option value="all">All</option>
+          </select>
         </label>
-        <label className="flex cursor-pointer items-center gap-1.5 hover:text-slate-200">
-          <input
-            type="checkbox"
-            className="h-3 w-3 cursor-pointer accent-emerald-500"
-            checked={filters.showAborted}
-            onChange={(e) => setFilters((f) => ({ ...f, showAborted: e.target.checked }))}
-          />
-          <span>aborted</span>
-        </label>
+        {hiddenCount > 0 ? (
+          <span className="text-slate-600">{hiddenCount} hidden</span>
+        ) : null}
       </div>
       <div className="flex-1 overflow-y-auto">
         {visibleRuns.length === 0 ? (
           <div className="px-4 py-6 text-sm text-slate-500">
             {runs.length === 0
-              ? 'No runs yet. Click "+ New run" to create one.'
+              ? 'No runs yet. Click "+ New" to create one.'
               : `All ${runs.length} runs are hidden by filters.`}
           </div>
         ) : (
@@ -184,10 +260,10 @@ export function RunList({
             {/* Named groups — each gets a subtle section header */}
             {Array.from(groupMap.entries()).map(([branch, groupRuns]) => (
               <div key={branch}>
-                <header className="border-b border-t border-slate-800 bg-slate-900/60 px-4 py-1.5 text-[10px] font-semibold text-slate-400">
+                <header className="border-b border-t border-blue-200/70 bg-blue-50/60 px-4 py-1 text-[10px] font-semibold uppercase tracking-wider text-blue-800">
                   ⎇ {branch}
                 </header>
-                <ul className="divide-y divide-slate-800">
+                <ul className="divide-y divide-slate-200/60">
                   {groupRuns.map((r) => (
                     <RunRow
                       key={r.run_id}
@@ -201,7 +277,7 @@ export function RunList({
             ))}
             {/* Ungrouped runs — no section header */}
             {ungrouped.length > 0 && (
-              <ul className="divide-y divide-slate-800">
+              <ul className="divide-y divide-slate-200/60">
                 {ungrouped.map((r) => (
                   <RunRow
                     key={r.run_id}

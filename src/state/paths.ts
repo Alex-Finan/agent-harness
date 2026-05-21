@@ -25,6 +25,10 @@ export function planPath(runId: string): string {
   return path.join(runDir(runId), 'plan.md');
 }
 
+export function overviewPath(runId: string): string {
+  return path.join(runDir(runId), 'overview.md');
+}
+
 function pad2(n: number): string {
   return n.toString().padStart(2, '0');
 }

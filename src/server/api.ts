@@ -4,12 +4,13 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { handleList } from '../cli/commands/list.js';
 import { loadRun, saveState } from '../state/run.js';
-import { runDir, planPath, sprintsDir, harnessHome } from '../state/paths.js';
+import { runDir, planPath, overviewPath, sprintsDir, harnessHome } from '../state/paths.js';
 import { writeAtomic, readOrNull } from '../lib/fs.js';
 import { VERSION } from '../index.js';
 import { parseSprintsFromPlan } from '../state/artifacts.js';
-import { readRunSnapshot, readTranscript } from './readers.js';
+import { readRunSnapshot, readTranscript, readSprintPips } from './readers.js';
 import { readAllPrompts, writePrompt, isPromptName } from './prompts.js';
+import { getApiKeyStatus, setApiKey, clearApiKey } from '../state/config.js';
 import { computeRunCost } from './cost.js';
 import { EventBus } from './events.js';
 import { HarnessWatcher } from './watcher.js';
@@ -33,6 +34,10 @@ const PlanBody = z.object({
   planMd: z.string().min(1)
 });
 
+const OverviewBody = z.object({
+  overviewMd: z.string().min(1)
+});
+
 const PlanReviseBody = z.object({
   message: z.string().min(1)
 });
@@ -43,6 +48,10 @@ const ContractBody = z.object({
 
 const PromptBody = z.object({
   content: z.string()
+});
+
+const ConfigBody = z.object({
+  anthropic_api_key: z.string().min(1)
 });
 
 export async function buildServer(opts: BuildServerOptions = {}): Promise<{
@@ -67,19 +76,24 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
   // -------------------- Runs --------------------
   app.get('/api/runs', async () => {
     const { runs } = await handleList();
-    // Attach lightweight cost summary so the sidebar can show $.
-    const withCosts = await Promise.all(
+    // Attach lightweight cost summary + sprint pips so the sidebar can render
+    // per-sprint phase dots without a second round-trip.
+    const enriched = await Promise.all(
       runs.map(async (r) => {
-        const cost = await computeRunCost(r.run_id);
+        const [cost, sprintPips] = await Promise.all([
+          computeRunCost(r.run_id),
+          readSprintPips(r.run_id)
+        ]);
         const dispatching = dispatcher.current(r.run_id);
         return {
           ...r,
           cost_total_usd: cost.totalUsd,
-          dispatching: dispatching && !dispatching.finished ? dispatching.role : null
+          dispatching: dispatching && !dispatching.finished ? dispatching.role : null,
+          sprint_pips: sprintPips
         };
       })
     );
-    return { runs: withCosts };
+    return { runs: enriched };
   });
 
   app.post('/api/runs', async (req, reply) => {
@@ -178,6 +192,20 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
     return { ok: true };
   });
 
+  // Recovery for halted runs: clears the halted status and zeros retry_count
+  // so the operator can fix the underlying issue (edit contract / revise plan)
+  // and then click "next" to retry with a fresh retry budget.
+  app.post('/api/runs/:id/resume', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      await dispatcher.resume(id);
+      return { ok: true };
+    } catch (e) {
+      reply.code(409);
+      return { error: (e as Error).message };
+    }
+  });
+
   // Update plan.md (operator-edited). Re-parses sprint count and updates state.
   app.put('/api/runs/:id/plan', async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -207,6 +235,19 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
       /* run may not exist */
     }
     return { ok: true, sprints: sprints.length };
+  });
+
+  // Update overview.md (operator-edited). Bypasses sprint parsing — the
+  // overview never gates execution; it's the authoritative narrative layer.
+  app.put('/api/runs/:id/overview', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const parsed = OverviewBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid body', issues: parsed.error.issues };
+    }
+    await writeAtomic(overviewPath(id), parsed.data.overviewMd);
+    return { ok: true };
   });
 
   app.put('/api/runs/:id/sprints/:sprint/contract', async (req, reply) => {
@@ -259,6 +300,33 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
     }
     await writePrompt(name, parsed.data.content);
     return { ok: true };
+  });
+
+  // -------------------- Config --------------------
+  // GET returns whether a key is configured + a masked preview + which source
+  // it came from (env vs config file). The raw key is NEVER returned.
+  app.get('/api/config', async () => {
+    return getApiKeyStatus();
+  });
+
+  app.put('/api/config', async (req, reply) => {
+    const parsed = ConfigBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid body', issues: parsed.error.issues };
+    }
+    try {
+      await setApiKey(parsed.data.anthropic_api_key);
+    } catch (e) {
+      reply.code(400);
+      return { error: (e as Error).message };
+    }
+    return getApiKeyStatus();
+  });
+
+  app.delete('/api/config', async () => {
+    await clearApiKey();
+    return getApiKeyStatus();
   });
 
   // -------------------- Repos --------------------

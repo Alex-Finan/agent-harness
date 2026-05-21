@@ -1,6 +1,16 @@
 import type { RunState } from '../api';
 import { formatCost, formatRelative } from '../lib/format';
+import { SprintPips } from './SprintPips';
+import { RunStatusChip, computeChipState, type ChipState } from './RunStatusChip';
 
+/**
+ * Multi-run dashboard, shown in the main pane when no run is selected.
+ * Designed for the side-monitor use case: glance at the page and answer
+ * "what is every agent doing, where is it stuck, what's done."
+ *
+ * Layout: a grid of run tiles, grouped by activity. Halted/idle first
+ * (they need the operator), live runs second, finished last.
+ */
 export function RunOverview({
   runs,
   onSelect
@@ -8,134 +18,167 @@ export function RunOverview({
   runs: RunState[];
   onSelect: (id: string) => void;
 }) {
-  const active = runs.filter((r) => r.status === 'in_progress');
-  const halted = runs.filter((r) => r.status === 'halted');
-  const completed = runs.filter((r) => r.status === 'completed');
+  // Order runs so the things that need attention show up first.
+  const ordered = [...runs].sort((a, b) => bucketWeight(a) - bucketWeight(b));
 
-  const tableRuns = runs.filter(
-    (r) => r.status === 'in_progress' || r.status === 'halted'
+  const halted = ordered.filter((r) => r.status === 'halted');
+  const idle = ordered.filter(
+    (r) => r.status === 'in_progress' && r.next_role !== 'done' && !r.dispatching
   );
+  const live = ordered.filter((r) => r.status === 'in_progress' && r.dispatching);
+  const done = ordered.filter((r) => r.status === 'completed' || r.next_role === 'done');
+  const aborted = ordered.filter((r) => r.status === 'aborted');
 
   return (
-    <div className="m-6 space-y-6">
-      {/* Summary stat chips */}
-      <div className="flex flex-wrap gap-3">
-        <StatChip label="active" count={active.length} color="emerald" />
-        <StatChip label="halted" count={halted.length} color="rose" />
-        <StatChip label="completed" count={completed.length} color="slate" />
-      </div>
+    <div className="mx-auto max-w-6xl space-y-6 p-6">
+      <header>
+        <h1 className="text-2xl font-semibold text-blue-950">Dashboard</h1>
+        <p className="mt-1 text-sm text-slate-600">
+          {runs.length === 0
+            ? 'No runs yet. Click + New in the sidebar to start one.'
+            : `Tracking ${runs.length} run${runs.length === 1 ? '' : 's'} across this harness.`}
+        </p>
+      </header>
 
-      {/* Active + halted runs table */}
-      {tableRuns.length === 0 ? (
-        <div className="rounded border border-slate-800 px-4 py-8 text-center text-sm text-slate-500">
-          No active runs. Click &quot;+ New run&quot; to create one.
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded border border-slate-800">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-800 bg-slate-900/60 text-left text-xs text-slate-400">
-                <th className="px-4 py-2 font-medium">Task</th>
-                <th className="px-4 py-2 font-medium">Sprint</th>
-                <th className="px-4 py-2 font-medium">Cost</th>
-                <th className="px-4 py-2 font-medium">Next role</th>
-                <th className="px-4 py-2 font-medium">Updated</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
-              {tableRuns.map((r) => (
-                <RunOverviewRow key={r.run_id} run={r} onSelect={onSelect} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {runs.length === 0 ? null : (
+        <>
+          <Section title="Needs you" runs={byRecency([...halted, ...idle])} onSelect={onSelect} emptyHint="Nothing waiting on you." />
+          <Section title="Live" runs={byRecency(live)} onSelect={onSelect} />
+          <Section title="Done" runs={byRecency(done)} onSelect={onSelect} />
+          {aborted.length > 0 ? (
+            <Section title="Aborted" runs={byRecency(aborted)} onSelect={onSelect} muted />
+          ) : null}
+        </>
       )}
     </div>
   );
 }
 
-function StatChip({
-  label,
-  count,
-  color
-}: {
-  label: string;
-  count: number;
-  color: 'emerald' | 'rose' | 'slate';
-}) {
-  const colorMap: Record<string, string> = {
-    emerald: 'border-emerald-700/50 bg-emerald-900/30 text-emerald-300',
-    rose: 'border-rose-700/50 bg-rose-900/30 text-rose-300',
-    slate: 'border-slate-700 bg-slate-800/60 text-slate-300'
-  };
+function bucketWeight(r: RunState): number {
+  if (r.status === 'halted') return 0;
+  if (r.status === 'in_progress' && !r.dispatching && r.next_role !== 'done') return 1;
+  if (r.status === 'in_progress' && r.dispatching) return 2;
+  if (r.status === 'completed' || r.next_role === 'done') return 3;
+  return 4;
+}
 
+/** Most-recently-updated runs first — typical "what's hot right now" ordering. */
+function byRecency(runs: RunState[]): RunState[] {
+  return [...runs].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+}
+
+function Section({
+  title,
+  runs,
+  onSelect,
+  emptyHint,
+  muted
+}: {
+  title: string;
+  runs: RunState[];
+  onSelect: (id: string) => void;
+  /** When provided, renders a short empty-state message instead of a one-line collapsed header. */
+  emptyHint?: string;
+  muted?: boolean;
+}) {
+  // Collapsed empty state — single muted heading, no panel.
+  if (runs.length === 0) {
+    if (!emptyHint) {
+      return (
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-blue-900/40">
+          {title} <span className="font-normal text-blue-900/30">· 0</span>
+        </h2>
+      );
+    }
+    return (
+      <section>
+        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-800">
+          {title} <span className="font-normal text-blue-700/60">· 0</span>
+        </h2>
+        <div className="rounded-md border border-slate-200 bg-white/30 px-4 py-3 text-sm text-slate-500">
+          {emptyHint}
+        </div>
+      </section>
+    );
+  }
   return (
-    <div className={`rounded border px-3 py-2 ${colorMap[color]}`}>
-      <span className="text-2xl font-bold leading-none">{count}</span>
-      <span className="ml-2 text-xs font-medium opacity-80">{label}</span>
-    </div>
+    <section>
+      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-800">
+        {title} <span className="font-normal text-blue-700/60">· {runs.length}</span>
+      </h2>
+      <div className={`grid gap-3 ${muted ? 'opacity-70' : ''} sm:grid-cols-2 xl:grid-cols-3`}>
+        {runs.map((r) => (
+          <RunTile key={r.run_id} run={r} onSelect={onSelect} />
+        ))}
+      </div>
+    </section>
   );
 }
 
-function RunOverviewRow({
-  run: r,
-  onSelect
-}: {
-  run: RunState;
-  onSelect: (id: string) => void;
-}) {
-  const isHalted = r.status === 'halted';
-  const isIdle =
-    r.status === 'in_progress' && r.next_role !== 'done' && !r.dispatching;
+const TILE_BORDER: Record<ChipState, string> = {
+  running: 'border-amber-300 hover:border-amber-400',
+  idle: 'border-yellow-300 hover:border-yellow-600/60',
+  halted: 'border-rose-300 hover:border-rose-600/70',
+  completed: 'border-emerald-300 hover:border-emerald-300',
+  aborted: 'border-slate-300 hover:border-slate-400'
+};
+
+function RunTile({ run: r, onSelect }: { run: RunState; onSelect: (id: string) => void }) {
+  const chip = computeChipState({
+    status: r.status,
+    nextRole: r.next_role,
+    dispatchingActive: !!r.dispatching
+  });
+  const totalSprints = Math.max(r.total_sprints, r.sprint_pips?.length ?? 0);
+  const completedSprints = r.sprint_pips?.filter((p) => p.verdict === 'PASS').length ?? 0;
 
   return (
-    <tr
-      className={`cursor-pointer transition hover:bg-slate-800/40 ${isHalted ? 'bg-rose-950/20' : ''}`}
+    <button
+      className={`flex flex-col gap-3 rounded-lg border bg-white/40 p-4 text-left transition hover:bg-white/70 ${TILE_BORDER[chip]}`}
       onClick={() => onSelect(r.run_id)}
+      title={r.run_id}
     >
-      <td className="max-w-[280px] px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          {isHalted && (
-            <span className="animate-pulse rounded border border-red-700 bg-red-900/60 px-1.5 py-0.5 text-[10px] font-semibold text-red-400">
-              FAIL
-            </span>
-          )}
-          {isIdle && (
-            <span className="rounded border border-yellow-700 bg-yellow-900/40 px-1.5 py-0.5 text-[10px] font-semibold text-yellow-400">
-              needs action
-            </span>
-          )}
-        </div>
-        <div
-          className="truncate font-medium text-slate-100"
-          title={r.task_summary}
-        >
+      <div className="flex items-start justify-between gap-2">
+        <RunStatusChip
+          state={chip}
+          detail={chip === 'completed' || chip === 'aborted' ? undefined : `${r.dispatching ?? r.next_role}`}
+        />
+        <span className="shrink-0 text-[11px] text-slate-500">{formatRelative(r.updated_at)}</span>
+      </div>
+
+      <div className="min-w-0">
+        <div className="line-clamp-2 text-sm font-medium text-slate-900">
           {r.task_summary || '(no task summary)'}
         </div>
-        <div className="font-mono text-[10px] text-slate-600 truncate" title={r.run_id}>
-          {r.run_id}
+        {r.branch ? (
+          <div className="mt-1 truncate font-mono text-[10px] text-slate-500">
+            ⎇ {r.branch}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="flex items-end justify-between gap-2 pt-1">
+        <div className="flex flex-col gap-1">
+          <SprintPips
+            pips={r.sprint_pips ?? []}
+            totalSprints={totalSprints}
+            currentSprint={r.current_sprint}
+            nextRole={r.next_role}
+            dispatching={!!r.dispatching}
+          />
+          <span className="text-[10px] uppercase tracking-wide text-slate-500">
+            {totalSprints > 0
+              ? `${completedSprints}/${totalSprints} sprint${totalSprints === 1 ? '' : 's'} passed`
+              : 'planning'}
+          </span>
         </div>
-      </td>
-      <td className="px-4 py-2.5 text-slate-300">
-        {r.current_sprint}/{r.total_sprints || '?'}
-      </td>
-      <td className="px-4 py-2.5 font-mono text-emerald-400 text-xs">
-        {formatCost(r.cost_total_usd)}
-      </td>
-      <td className="px-4 py-2.5">
-        <span
-          className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-            r.dispatching
-              ? 'bg-amber-900/40 text-amber-300 animate-pulse'
-              : 'bg-slate-800 text-slate-400'
-          }`}
-        >
-          {r.dispatching ? `${r.dispatching}…` : r.next_role}
-        </span>
-      </td>
-      <td className="px-4 py-2.5 text-xs text-slate-500">
-        {formatRelative(r.updated_at)}
-      </td>
-    </tr>
+        {r.cost_total_usd && r.cost_total_usd > 0 ? (
+          <span className="text-xs tabular-nums text-emerald-600/80">
+            {formatCost(r.cost_total_usd)}
+          </span>
+        ) : null}
+      </div>
+    </button>
   );
 }
+

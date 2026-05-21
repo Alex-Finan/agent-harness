@@ -45,14 +45,14 @@ export function PromptsPanel() {
 
   return (
     <div className="panel flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-slate-800 px-4 py-2">
+      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
         <div className="text-sm font-semibold">system prompts</div>
-        <div className="flex gap-1 rounded border border-slate-800 bg-slate-950 p-0.5">
+        <div className="flex gap-1 rounded border border-slate-200 bg-white p-0.5">
           {NAMES.map((n) => (
             <button
               key={n}
               className={`rounded px-3 py-1 text-xs ${
-                tab === n ? 'bg-slate-800 text-emerald-400' : 'text-slate-400 hover:text-slate-100'
+                tab === n ? 'bg-slate-100 text-blue-700' : 'text-slate-600 hover:text-slate-900'
               }`}
               onClick={() => setTab(n)}
             >
@@ -61,11 +61,11 @@ export function PromptsPanel() {
           ))}
         </div>
       </div>
-      <div className="border-b border-slate-800 px-4 py-2 text-xs text-slate-500">
+      <div className="border-b border-slate-200 px-4 py-2 text-xs text-slate-500">
         Edits apply globally to all future role invocations. The harness re-reads these on every session start.
       </div>
       {error ? (
-        <div className="m-3 rounded border border-rose-700 bg-rose-900/40 px-3 py-2 text-sm text-rose-200">
+        <div className="m-3 rounded border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-700">
           {error}
         </div>
       ) : null}
@@ -76,9 +76,9 @@ export function PromptsPanel() {
           onChange={(e) => setDraft(e.target.value)}
         />
       </div>
-      <div className="flex items-center justify-end gap-2 border-t border-slate-800 px-4 py-2">
+      <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-2">
         {savedTick > 0 && !dirty ? (
-          <span className="text-xs text-emerald-400">saved</span>
+          <span className="text-xs text-emerald-600">saved</span>
         ) : null}
         <button
           className="btn"

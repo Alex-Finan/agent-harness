@@ -19,6 +19,17 @@ export interface RunState {
   base_branch?: string;
   cost_total_usd?: number;
   dispatching?: 'planner' | 'next' | null;
+  sprint_pips?: SprintPip[];
+}
+
+export interface SprintPip {
+  num: number;
+  verdict: Verdict | null;
+  hasContract: boolean;
+  hasOutput: boolean;
+  contractAt: string | null;
+  outputAt: string | null;
+  verdictAt: string | null;
 }
 
 export interface SprintSnapshot {
@@ -29,10 +40,14 @@ export interface SprintSnapshot {
   outputMd: string | null;
   verdictMd: string | null;
   verdict: Verdict | null;
+  contractAt: string | null;
+  outputAt: string | null;
+  verdictAt: string | null;
 }
 
 export interface RunSnapshot {
   taskMd: string | null;
+  overviewMd: string | null;
   planMd: string | null;
   sprints: SprintSnapshot[];
   logFiles: string[];
@@ -116,6 +131,8 @@ export const api = {
 
   abort: (id: string) => http<{ ok: boolean }>(`/api/runs/${id}/abort`, { method: 'POST' }),
 
+  resume: (id: string) => http<{ ok: boolean }>(`/api/runs/${id}/resume`, { method: 'POST' }),
+
   revisePlan: (id: string, message: string) =>
     http<{ runId: string; role: string; startedAt: string }>(`/api/runs/${id}/plan/revise`, {
       method: 'POST',
@@ -126,6 +143,12 @@ export const api = {
     http<{ ok: boolean; sprints: number }>(`/api/runs/${id}/plan`, {
       method: 'PUT',
       body: JSON.stringify({ planMd })
+    }),
+
+  saveOverview: (id: string, overviewMd: string) =>
+    http<{ ok: boolean }>(`/api/runs/${id}/overview`, {
+      method: 'PUT',
+      body: JSON.stringify({ overviewMd })
     }),
 
   saveContract: (id: string, sprint: string, contractMd: string) =>
@@ -148,8 +171,24 @@ export const api = {
     }),
 
   listRepos: (opts: { refresh?: boolean } = {}) =>
-    http<RepoListResult>(`/api/repos${opts.refresh ? '?refresh=1' : ''}`)
+    http<RepoListResult>(`/api/repos${opts.refresh ? '?refresh=1' : ''}`),
+
+  getConfig: () => http<ApiKeyStatus>('/api/config'),
+
+  setApiKey: (key: string) =>
+    http<ApiKeyStatus>('/api/config', {
+      method: 'PUT',
+      body: JSON.stringify({ anthropic_api_key: key })
+    }),
+
+  clearApiKey: () => http<ApiKeyStatus>('/api/config', { method: 'DELETE' })
 };
+
+export interface ApiKeyStatus {
+  hasKey: boolean;
+  masked: string | null;
+  source: 'env' | 'config' | 'none';
+}
 
 export interface Repo {
   slug: string;
@@ -185,6 +224,7 @@ export type ServerEvent =
   | { type: 'run_state'; runId: string; state: RunState }
   | { type: 'run_created'; runId: string; state: RunState }
   | { type: 'plan'; runId: string; planMd: string }
+  | { type: 'overview'; runId: string; overviewMd: string }
   | { type: 'contract'; runId: string; sprint: string; contractMd: string }
   | { type: 'output'; runId: string; sprint: string; outputMd: string }
   | { type: 'verdict'; runId: string; sprint: string; verdictMd: string }

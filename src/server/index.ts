@@ -5,6 +5,7 @@ import { buildServer } from './api.js';
 import type { RunDispatcher } from './dispatch.js';
 import { runsRoot, statePath } from '../state/paths.js';
 import { StateSchema } from '../state/schema.js';
+import { applyConfigToEnv } from '../state/config.js';
 
 export interface ServeOptions {
   port?: number;
@@ -96,6 +97,9 @@ export async function serve(opts: ServeOptions = {}): Promise<{
 }> {
   const port = opts.port ?? 8787;
   const host = opts.host ?? '127.0.0.1';
+  // Hydrate ANTHROPIC_API_KEY from ~/.agent-harness/config.json before the
+  // server (and any SDK call it makes) starts. The env var always wins.
+  await applyConfigToEnv();
   const webDist = opts.webDist ?? defaultWebDist();
   if (webDist) {
     // Soft existence check (just for the log line).

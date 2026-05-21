@@ -147,4 +147,29 @@ export class RunDispatcher {
     }
     return handleAbort({ runId });
   }
+
+  /**
+   * Recover a halted run by resetting status to in_progress and zeroing the
+   * retry counter. Typical flow: operator edits the contract (or revises the
+   * plan) to address the FAIL, then resumes and clicks "next" to retry the
+   * sprint with a fresh budget of retries.
+   */
+  async resume(runId: string): Promise<{ ok: true }> {
+    const run = await loadRun(runId);
+    if (run.state.status !== 'halted') {
+      throw new Error(`Cannot resume a ${run.state.status} run — only halted runs.`);
+    }
+    await saveState({
+      ...run.state,
+      status: 'in_progress',
+      retry_count: 0,
+      updated_at: new Date().toISOString()
+    });
+    this.bus.publish({
+      type: 'run_state',
+      runId,
+      state: (await loadRun(runId)).state
+    });
+    return { ok: true };
+  }
 }

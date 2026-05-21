@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import chokidar, { type FSWatcher } from 'chokidar';
-import { runsRoot, runDir, planPath, logsDir, sprintsDir, statePath } from '../state/paths.js';
+import { runsRoot, runDir, planPath, overviewPath, logsDir, sprintsDir, statePath } from '../state/paths.js';
 import { readOrNull } from '../lib/fs.js';
 import { parseVerdict } from '../state/artifacts.js';
 import { ensureDir } from '../lib/fs.js';
@@ -23,7 +23,7 @@ interface FileCursor {
  *
  * State.json: re-read entirely on change; broadcast the new state.
  *
- * plan.md, contract.md, output.md, verdict.md: re-read entirely (small).
+ * overview.md, plan.md, contract.md, output.md, verdict.md: re-read entirely (small).
  */
 export class HarnessWatcher {
   private watcher: FSWatcher | null = null;
@@ -85,6 +85,12 @@ export class HarnessWatcher {
     if (filePath === planPath(runId)) {
       const planMd = await readOrNull(filePath);
       if (planMd !== null) this.bus.publish({ type: 'plan', runId, planMd });
+      return;
+    }
+
+    if (filePath === overviewPath(runId)) {
+      const overviewMd = await readOrNull(filePath);
+      if (overviewMd !== null) this.bus.publish({ type: 'overview', runId, overviewMd });
       return;
     }
 
