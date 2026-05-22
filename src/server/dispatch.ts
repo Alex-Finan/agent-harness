@@ -69,7 +69,11 @@ export class RunDispatcher {
           if (s.status !== 'in_progress') return;
           if (s.next_role === 'planner') {
             await handlePlan({ runId });
-            continue;
+            // Mandatory post-planning checkpoint: stop here so the operator
+            // can review/revise plan.md and per-sprint contracts before any
+            // implementation runs. Resuming requires an explicit `next` or
+            // `auto-iterate` from the user.
+            return;
           }
           if (s.next_role === 'done') return;
           await handleNext({ runId });

@@ -55,6 +55,31 @@ export interface SprintPip {
 
 const SPRINT_DIR_RE = /^(\d+)-(.+)$/;
 
+/**
+ * Plan revisions can rename a sprint's slug, leaving the old directory orphaned
+ * on disk (e.g. `04-ensemble-hpo` and `04-ensemble-ssl` for the same sprint
+ * 4). The orphan still has a contract.md from a prior plan, so we can't just
+ * drop dirs with no artifacts. Heuristic: per sprint number, keep the dir
+ * whose contract.md was written most recently — that's the one the current
+ * plan points at.
+ */
+function dedupeByNum<T extends { num: number; contractAt: string | null }>(
+  sprints: T[]
+): T[] {
+  const byNum = new Map<number, T>();
+  for (const s of sprints) {
+    const existing = byNum.get(s.num);
+    if (!existing) {
+      byNum.set(s.num, s);
+      continue;
+    }
+    const a = existing.contractAt ? Date.parse(existing.contractAt) : -1;
+    const b = s.contractAt ? Date.parse(s.contractAt) : -1;
+    if (b > a) byNum.set(s.num, s);
+  }
+  return Array.from(byNum.values()).sort((a, b) => a.num - b.num);
+}
+
 export async function readSprints(runId: string): Promise<SprintSnapshot[]> {
   const dir = sprintsDir(runId);
   let entries: string[];
@@ -95,7 +120,7 @@ export async function readSprints(runId: string): Promise<SprintSnapshot[]> {
       verdictAt: verdictStat ? verdictStat.mtime.toISOString() : null
     });
   }
-  return sprints;
+  return dedupeByNum(sprints);
 }
 
 /**
@@ -135,7 +160,7 @@ export async function readSprintPips(runId: string): Promise<SprintPip[]> {
       verdictAt: verdictStat ? verdictStat.mtime.toISOString() : null
     });
   }
-  return pips;
+  return dedupeByNum(pips);
 }
 
 async function statOrNull(p: string): Promise<{ mtime: Date } | null> {

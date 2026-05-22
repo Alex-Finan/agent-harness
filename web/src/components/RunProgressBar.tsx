@@ -1,5 +1,6 @@
 import type { RunDetail, RunState, SprintPip, SprintSnapshot } from '../api';
 import { SprintPips } from './SprintPips';
+import { RoleBadge } from './RoleBadge';
 import { parsePlanSections } from '../lib/plan-diff';
 
 /**
@@ -8,21 +9,41 @@ import { parsePlanSections } from '../lib/plan-diff';
  * the sprint's dir slug if plan.md doesn't follow the `## Sprint N — title`
  * convention.
  */
-function describeCurrent(detail: RunDetail): string {
+interface StatusLine {
+  text: string;
+  showRoleBadge: boolean;
+}
+
+/**
+ * Sprint count source of truth: `state.total_sprints` (parsed from plan.md by
+ * the planner). Fall back to `sprints.length` only during the brief window
+ * before plan.md exists / has been parsed, where total_sprints is still 0.
+ * Never `Math.max` the two — orphan sprint dirs from prior plan revisions
+ * would inflate the count.
+ */
+function resolveSprintCount(stateTotal: number, snapshotCount: number): number {
+  return stateTotal > 0 ? stateTotal : snapshotCount;
+}
+
+function describeCurrent(detail: RunDetail): StatusLine {
   const { state, snapshot } = detail;
   const isDone = state.next_role === 'done' || state.status === 'completed';
-  const total = Math.max(state.total_sprints, snapshot.sprints.length);
+  const total = resolveSprintCount(state.total_sprints, snapshot.sprints.length);
 
   if (isDone) {
-    return total === 1
-      ? 'Sprint complete · ready to push'
-      : `All ${total} sprints complete · ready to push`;
+    return {
+      text:
+        total === 1
+          ? 'Sprint complete · ready to push'
+          : `All ${total} sprints complete · ready to push`,
+      showRoleBadge: false
+    };
   }
   if (state.status === 'halted') {
-    return `Halted at sprint ${state.current_sprint} of ${total}`;
+    return { text: `Halted at sprint ${state.current_sprint} of ${total}`, showRoleBadge: true };
   }
   if (state.status === 'aborted') {
-    return 'Run aborted';
+    return { text: 'Run aborted', showRoleBadge: false };
   }
 
   const num = state.current_sprint;
@@ -36,14 +57,11 @@ function describeCurrent(detail: RunDetail): string {
     title = sprint.slug.replace(/-/g, ' ');
   }
 
-  const role = state.dispatching ?? state.next_role;
-  const roleLabel = role === 'planner' ? 'planning' : role === 'next' ? 'running' : role;
   const verb = state.dispatching ? '⚡' : '▸';
-
-  const base = title
+  const text = title
     ? `${verb} Sprint ${num} of ${total} — ${title}`
     : `${verb} Sprint ${num} of ${total}`;
-  return `${base} · ${roleLabel}`;
+  return { text, showRoleBadge: true };
 }
 
 /**
@@ -93,7 +111,7 @@ export function RunProgressBar({
   const isStacked = !!(stack && stack.ordered.length > 1);
 
   const livePips = pipsFromSprints(sprints);
-  const liveTotal = Math.max(detail.state.total_sprints, sprints.length);
+  const liveTotal = resolveSprintCount(detail.state.total_sprints, sprints.length);
   const livePassed = livePips.filter((p) => p.verdict === 'PASS').length;
 
   const statusLine = describeCurrent(detail);
@@ -116,7 +134,15 @@ export function RunProgressBar({
             {livePassed}/{liveTotal} sprint{liveTotal === 1 ? '' : 's'} passed
           </span>
         </div>
-        <div className="mt-1 text-xs text-slate-700">{statusLine}</div>
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-700">
+          <span>{statusLine.text}</span>
+          {statusLine.showRoleBadge ? (
+            <RoleBadge
+              nextRole={detail.state.next_role}
+              dispatching={detail.state.dispatching ?? null}
+            />
+          ) : null}
+        </div>
       </div>
     );
   }
@@ -131,7 +157,15 @@ export function RunProgressBar({
           PR {stack!.current_index + 1} of {stack!.ordered.length}
         </span>
       </div>
-      <div className="mt-1 text-xs text-slate-700">{statusLine}</div>
+      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-700">
+        <span>{statusLine.text}</span>
+        {statusLine.showRoleBadge ? (
+          <RoleBadge
+            nextRole={detail.state.next_role}
+            dispatching={detail.state.dispatching ?? null}
+          />
+        ) : null}
+      </div>
       <ol className="mt-2 flex flex-wrap items-center gap-1.5">
         {stack!.ordered.map((entry, i) => {
           const isCurrent = entry.runId === detail.state.run_id;
@@ -187,7 +221,10 @@ function PrSegment({
   let inner: React.ReactNode;
   if (isCurrent && detail) {
     const sprintsHere = detail.snapshot.sprints;
-    const total = Math.max(detail.state.total_sprints, sprintsHere.length, 1);
+    const total = Math.max(
+      resolveSprintCount(detail.state.total_sprints, sprintsHere.length),
+      1
+    );
     inner = (
       <SprintPips
         pips={pipsFromSprints(sprintsHere)}
@@ -198,7 +235,10 @@ function PrSegment({
       />
     );
   } else if (sibling) {
-    const total = Math.max(sibling.total_sprints, sibling.sprint_pips?.length ?? 0, 1);
+    const total = Math.max(
+      resolveSprintCount(sibling.total_sprints, sibling.sprint_pips?.length ?? 0),
+      1
+    );
     inner = (
       <SprintPips
         pips={sibling.sprint_pips ?? []}

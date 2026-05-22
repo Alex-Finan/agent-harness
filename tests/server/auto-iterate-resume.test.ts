@@ -131,7 +131,7 @@ describe('auto-iterate-resume', () => {
   test('startAutoIterate clears auto_iterate to false after loop completes', async () => {
     const { runId } = await handleInit({ repo: tmp, task: 't', maxRetries: 3 });
 
-    // Planner mock
+    // Planner mock — auto-iterate stops here at the post-planning checkpoint.
     mockRunSession.mockImplementationOnce(async (cfg: unknown) => {
       const c = cfg as { cwd: string };
       await fs.writeFile(path.join(c.cwd, 'plan.md'), '# Plan\n## Sprint 1: Alpha\n');
@@ -143,7 +143,7 @@ describe('auto-iterate-resume', () => {
       return { success: true, durationMs: 1 };
     });
 
-    // Executor mock
+    // Executor mock — runs after the user resumes past the checkpoint.
     mockRunSession.mockImplementationOnce(async () => {
       await fs.writeFile(
         path.join(tmp, 'runs', runId, 'sprints', '01-alpha', 'output.md'),
@@ -162,14 +162,63 @@ describe('auto-iterate-resume', () => {
     });
 
     await withServer(async ({ dispatcher }) => {
-      const handle = await dispatcher.startAutoIterate(runId);
-      await handle.promise;
+      // First auto-iterate: planner runs, then stops at the checkpoint.
+      const planHandle = await dispatcher.startAutoIterate(runId);
+      await planHandle.promise;
+
+      // Second auto-iterate (operator clicks "go" after reviewing the plan):
+      // executor + evaluator run through to completion.
+      const execHandle = await dispatcher.startAutoIterate(runId);
+      await execHandle.promise;
 
       const raw = await fs.readFile(statePath(runId), 'utf8');
       const state = JSON.parse(raw) as { auto_iterate?: boolean; status?: string };
       expect(state.auto_iterate).toBe(false);
       expect(state.status).toBe('completed');
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // Post-planning checkpoint: auto-iterate must not roll directly into the
+  // executor — the operator gets a chance to review/revise the plan first.
+  // -------------------------------------------------------------------------
+
+  test('startAutoIterate halts at the post-planning checkpoint and does not run the executor', async () => {
+    const { runId } = await handleInit({ repo: tmp, task: 't', maxRetries: 3 });
+
+    // Planner mock: writes plan + sprint scaffold.
+    mockRunSession.mockImplementationOnce(async (cfg: unknown) => {
+      const c = cfg as { cwd: string };
+      await fs.writeFile(path.join(c.cwd, 'plan.md'), '# Plan\n## Sprint 1: Alpha\n');
+      await fs.mkdir(path.join(c.cwd, 'sprints', '01-alpha'), { recursive: true });
+      await fs.writeFile(
+        path.join(c.cwd, 'sprints', '01-alpha', 'contract.md'),
+        '# Sprint 1\n## Rubric\n1. ok\n'
+      );
+      return { success: true, durationMs: 1 };
+    });
+
+    // Executor mock: must NOT be called. If invoked, fail loudly.
+    mockRunSession.mockImplementationOnce(async () => {
+      throw new Error('executor should not run before operator approves the plan');
+    });
+
+    await withServer(async ({ dispatcher }) => {
+      const handle = await dispatcher.startAutoIterate(runId);
+      await handle.promise;
+    });
+
+    expect(mockRunSession).toHaveBeenCalledTimes(1);
+
+    const raw = await fs.readFile(statePath(runId), 'utf8');
+    const state = JSON.parse(raw) as {
+      auto_iterate?: boolean;
+      status?: string;
+      next_role?: string;
+    };
+    expect(state.next_role).toBe('executor');
+    expect(state.status).toBe('in_progress');
+    expect(state.auto_iterate).toBe(false);
   });
 
   // -------------------------------------------------------------------------

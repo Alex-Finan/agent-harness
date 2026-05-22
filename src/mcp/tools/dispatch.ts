@@ -5,13 +5,13 @@ import type { RunDispatcher } from '../../server/dispatch.js';
 export function registerDispatch(server: McpServer, dispatcher: RunDispatcher): void {
   server.tool(
     'harness_dispatch',
-    'Dispatch a role session for a run. Use role="planner" to run the planner, role="next" to run the next executor/evaluator step, or role="auto" to auto-iterate until completion. Non-blocking: returns immediately and the session runs in the background. Poll with harness_get_run to check progress.',
+    'Dispatch a role session for a run. Use role="planner" to run the planner, role="next" to run the next executor/evaluator step, or role="auto" to auto-iterate. Auto-iterate stops at the post-planning checkpoint so the operator can review/revise plan.md before implementation; resume by dispatching role="auto" or role="next" again. Non-blocking: returns immediately and the session runs in the background. Poll with harness_get_run to check progress.',
     {
       run_id: z.string().describe('The run ID'),
       role: z
         .enum(['planner', 'next', 'auto'])
         .describe(
-          '"planner" runs the planner role, "next" runs the next executor/evaluator step, "auto" iterates until the run completes'
+          '"planner" runs the planner role, "next" runs the next executor/evaluator step, "auto" iterates through executor/evaluator until completion — stops at the post-planning checkpoint requiring an explicit resume'
         )
     },
     async ({ run_id, role }) => {
