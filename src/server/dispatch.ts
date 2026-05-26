@@ -5,7 +5,7 @@ import { handleInit, type InitArgs, type InitResult } from '../cli/commands/init
 import { handleAbort } from '../cli/commands/abort.js';
 import { loadRun, saveState } from '../state/run.js';
 import { findStackContaining, writeStack } from '../state/stack.js';
-import { planPath, overviewPath } from '../state/paths.js';
+import { planPath, overviewPath, plannerReplyPath } from '../state/paths.js';
 import { readSprints } from './readers.js';
 import {
   appendPlannerEntry,
@@ -59,6 +59,13 @@ export class RunDispatcher {
     // we can summarise what concretely changed once it finishes.
     const trimmed = revisionMessage.trim();
     const before = await snapshotPlannerDocs(runId);
+    // Clear any stale reply file from the previous turn so we don't surface
+    // a leftover response if the planner this time decides not to write one.
+    try {
+      await fs.unlink(plannerReplyPath(runId));
+    } catch {
+      /* not present — fine */
+    }
     try {
       await appendUserEntry(runId, trimmed, pendingCommentCount);
     } catch {
@@ -321,6 +328,22 @@ async function writePlannerSummary(
       'Planner failed before producing a response. Check the run log for details.',
       true
     );
+    return;
+  }
+  // Conversational reply wins over the synthetic file-diff summary: when the
+  // planner writes planner-reply.md, the user's intent was usually "answer my
+  // question" rather than "rewrite the plan." Surface that directly.
+  const reply = (await readFileOrEmpty(plannerReplyPath(runId))).trim();
+  if (reply) {
+    const after = await snapshotPlannerDocs(runId);
+    const changed =
+      before.planMd !== after.planMd ||
+      before.overviewMd !== after.overviewMd ||
+      before.sprintCount !== after.sprintCount;
+    const text = changed
+      ? `${reply}\n\n_(Also updated the plan — review the plan column for the new state.)_`
+      : reply;
+    await appendPlannerEntry(runId, text, false);
     return;
   }
   const after = await snapshotPlannerDocs(runId);

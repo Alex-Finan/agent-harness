@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, type ConversationEntry, type RunDetail } from '../api';
 import { formatRelative } from '../lib/format';
 import { Markdown } from './Markdown';
@@ -42,6 +42,21 @@ export function PlannerRail({
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Planner can take over the whole viewport for distraction-free chatting.
+  // Escape collapses; typing inside the textarea ignores Escape so the user
+  // can clear their input without accidentally collapsing the rail.
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable)) return;
+      setExpanded(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [expanded]);
   // Server-side log is the source of truth; we just keep an optimistic local
   // entry around between "Send" and the next snapshot refresh so the user
   // sees their message instantly even before the SSE re-fetch lands.
@@ -64,10 +79,48 @@ export function PlannerRail({
   // overview.md. The planner emits this section when it has decisions it
   // can't make on its own; the UI surfaces them as a checklist with a single
   // shared composer to answer all at once.
-  const questions = useMemo(
+  const rawQuestions = useMemo(
     () => extractQuestions(planMd) ?? extractQuestions(overviewMd) ?? [],
     [planMd, overviewMd]
   );
+
+  // Optimistically hide questions the user has already answered, even if the
+  // planner hasn't gotten around to removing them from plan.md yet. Persisted
+  // per-run in localStorage so the hide survives reloads — if the planner
+  // re-asks the same wording (rare; usually it rewrites), the entry stays
+  // hidden until the user explicitly clears it.
+  const answeredKey = `plannerRail.answered.${runId}`;
+  const [answeredSet, setAnsweredSet] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(answeredKey);
+      if (!raw) return new Set();
+      const parsed = JSON.parse(raw);
+      return new Set(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      return new Set();
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(answeredKey, JSON.stringify(Array.from(answeredSet)));
+    } catch {
+      /* best-effort */
+    }
+  }, [answeredSet, answeredKey]);
+  const questions = useMemo(
+    () => rawQuestions.filter((q) => !answeredSet.has(q)),
+    [rawQuestions, answeredSet]
+  );
+  function markAnswered(qs: string[]) {
+    setAnsweredSet((prev) => {
+      const next = new Set(prev);
+      for (const q of qs) next.add(q);
+      return next;
+    });
+  }
+  function resetAnswered() {
+    setAnsweredSet(new Set());
+  }
 
   // Sending is blocked while any role is dispatched — even mid-executor runs,
   // we don't want messages racing with an in-flight loop.
@@ -106,7 +159,21 @@ export function PlannerRail({
   }
 
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col bg-gradient-to-b from-slate-50 to-white">
+    <>
+      {expanded ? (
+        <div
+          className="fixed inset-0 z-40 bg-slate-900/40"
+          onClick={() => setExpanded(false)}
+          aria-hidden
+        />
+      ) : null}
+      <aside
+        className={`flex min-h-0 flex-col bg-gradient-to-b from-slate-50 to-white ${
+          expanded
+            ? 'fixed inset-6 z-50 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl lg:inset-10'
+            : 'h-full w-full'
+        }`}
+      >
       {/* Header + tabs */}
       <div className="border-b border-slate-200 bg-white/80 backdrop-blur-sm">
         <div className="flex items-center justify-between px-4 py-2.5">
@@ -126,6 +193,15 @@ export function PlannerRail({
               </span>
             )}
           </div>
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-50"
+            title={expanded ? 'Collapse (Esc)' : 'Expand to fullscreen'}
+            aria-label={expanded ? 'Collapse planner' : 'Expand planner'}
+          >
+            {expanded ? '⤡' : '⤢'}
+          </button>
         </div>
         <div className="flex items-center gap-1 px-3">
           <TabButton active={tab === 'conv'} onClick={() => setTab('conv')}>
@@ -184,6 +260,9 @@ export function PlannerRail({
             planMdPresent={!!planMd}
             runId={runId}
             disabled={anyDispatchActive}
+            onSubmitted={markAnswered}
+            onResetHidden={resetAnswered}
+            hiddenCount={rawQuestions.length - questions.length}
           />
         )}
       </div>
@@ -240,7 +319,8 @@ export function PlannerRail({
           </button>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }
 
@@ -353,8 +433,20 @@ function Message({ entry }: { entry: ConversationEntry }) {
           <span className="ml-2 text-rose-600">· failed</span>
         ) : null}
       </div>
-      <div className="mt-1 whitespace-pre-wrap text-sm text-slate-800">
-        {entry.text || <em className="text-slate-500">(comments only)</em>}
+      <div className="mt-1 text-sm text-slate-800">
+        {entry.text ? (
+          isUser ? (
+            // User turns are typed plain into the textarea — preserve newlines
+            // verbatim instead of treating leading whitespace as markdown.
+            <div className="whitespace-pre-wrap">{entry.text}</div>
+          ) : (
+            // Planner replies are markdown (headings, tables, code blocks,
+            // mermaid). Reuse the same renderer the plan column uses.
+            <Markdown source={entry.text} />
+          )
+        ) : (
+          <em className="text-slate-500">(comments only)</em>
+        )}
       </div>
     </div>
   );
@@ -364,12 +456,22 @@ function QuestionsTab({
   questions,
   planMdPresent,
   runId,
-  disabled
+  disabled,
+  onSubmitted,
+  onResetHidden,
+  hiddenCount
 }: {
   questions: string[];
   planMdPresent: boolean;
   runId: string;
   disabled: boolean;
+  /** Called with the questions the user just answered so the parent can
+   *  optimistically remove them from the queue. */
+  onSubmitted: (qs: string[]) => void;
+  /** Restore any questions the user previously hid (i.e. the planner kept
+   *  re-asking the same one and the user wants to see it again). */
+  onResetHidden: () => void;
+  hiddenCount: number;
 }) {
   // One textarea state per question. Keyed by the question text itself so the
   // draft survives re-renders even if the questions array is rebuilt — and
@@ -380,12 +482,25 @@ function QuestionsTab({
 
   if (questions.length === 0) {
     return (
-      <div className="px-3 py-3">
+      <div className="px-3 py-3 space-y-3">
         <div className="rounded-md border border-dashed border-slate-200 bg-white px-3 py-6 text-center text-xs text-slate-500">
           {planMdPresent
             ? 'No open questions from the planner. When the planner needs a decision it can’t make on its own, it’ll write a "## Questions" section in plan.md and they’ll show up here.'
             : 'No plan yet — questions will appear here when the planner needs a decision from you.'}
         </div>
+        {hiddenCount > 0 ? (
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+            {hiddenCount} previously-answered question
+            {hiddenCount === 1 ? '' : 's'} hidden.{' '}
+            <button
+              type="button"
+              onClick={onResetHidden}
+              className="font-medium text-blue-700 underline-offset-2 hover:underline"
+            >
+              Show them again
+            </button>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -393,6 +508,8 @@ function QuestionsTab({
   const filledCount = questions.filter((q) => (answers[q] ?? '').trim().length > 0).length;
 
   async function submit() {
+    const answered = questions.filter((q) => (answers[q] ?? '').trim().length > 0);
+    if (answered.length === 0) return;
     const lines: string[] = [
       'Answers to your questions (please apply these to plan.md, then remove the Questions section):',
       ''
@@ -407,6 +524,11 @@ function QuestionsTab({
     setError(null);
     try {
       await api.revisePlan(runId, lines.join('\n'));
+      // Optimistically hide the questions the user actually answered. If the
+      // planner removes them from plan.md too, fine — they stay hidden. If
+      // the planner forgets, they stay hidden anyway (the user submitted),
+      // and the user can restore via the "Show again" link.
+      onSubmitted(answered);
       setAnswers({});
     } catch (e) {
       setError((e as Error).message);

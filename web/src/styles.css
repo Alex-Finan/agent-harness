@@ -138,4 +138,19 @@ body {
   .markdown :where(a) {
     @apply text-blue-700 underline-offset-2 hover:underline;
   }
+
+  /* Mermaid HTML-labels render inside <foreignObject><div>…</div></foreignObject>.
+     Long single-word identifiers like `CHARGEBACK_REASON_CODE` or
+     `state.transactionPackets` have no spaces to wrap on, so mermaid's
+     wrappingWidth doesn't help — the text just overflows the node box and
+     gets visually clipped. Force word breaks on any character so these
+     long identifiers wrap inside the node instead of bleeding past it. */
+  .mermaid-rendered foreignObject div,
+  .mermaid-rendered foreignObject span,
+  .mermaid-rendered .nodeLabel {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    line-height: 1.25;
+  }
 }

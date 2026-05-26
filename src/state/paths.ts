@@ -65,3 +65,12 @@ export function logsDir(runId: string): string {
 export function plannerLogPath(runId: string): string {
   return path.join(runDir(runId), 'planner-log.jsonl');
 }
+
+/**
+ * Conversational reply scratchpad — the planner writes its chat-style answer
+ * here when the user's revise message is a question / clarification rather
+ * than an instruction to change the plan. Overwritten each dispatch.
+ */
+export function plannerReplyPath(runId: string): string {
+  return path.join(runDir(runId), 'planner-reply.md');
+}

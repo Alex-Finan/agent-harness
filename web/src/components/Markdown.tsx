@@ -45,12 +45,19 @@ function ensureMermaidInit() {
       fontSize: '15px'
     },
     flowchart: {
+      // Keep intrinsic SVG width — `useMaxWidth:true` was scaling the whole
+      // diagram down to fit the panel, which compressed every node and
+      // chopped labels at their bounding box. With useMaxWidth:false the
+      // wrapper's overflow-x-auto handles horizontal scroll for wide
+      // diagrams while letting each node breathe at its natural size.
       useMaxWidth: false,
       htmlLabels: true,
-      padding: 16,
-      nodeSpacing: 55,
-      rankSpacing: 70,
-      wrappingWidth: 260,
+      padding: 18,
+      nodeSpacing: 60,
+      rankSpacing: 80,
+      // Label wrap width — bumped so multi-clause node labels break on word
+      // boundaries instead of overflowing the node bounding box.
+      wrappingWidth: 340,
       curve: 'basis'
     },
     sequence: { useMaxWidth: false, wrap: true },
@@ -101,6 +108,9 @@ export function Markdown({ source }: { source: string }) {
           `;
           const svgEl = wrapper.querySelector('svg');
           if (svgEl) {
+            // Keep intrinsic width so dense diagrams aren't compressed (which
+            // was crushing node boxes and clipping labels). Wider-than-panel
+            // diagrams scroll horizontally via the wrapper.
             svgEl.removeAttribute('width');
             svgEl.removeAttribute('height');
             svgEl.style.maxWidth = 'none';
@@ -171,9 +181,12 @@ function MermaidZoomModal({
     if (!svgEl) return;
     svgEl.removeAttribute('width');
     svgEl.removeAttribute('height');
-    svgEl.style.maxWidth = 'none';
+    // Cap so the diagram doesn't render at 3000px on a 4K monitor — readable
+    // but not absurd. The modal's scroll handles anything wider.
+    svgEl.style.maxWidth = 'min(100%, 1400px)';
     svgEl.style.height = 'auto';
     svgEl.style.display = 'block';
+    svgEl.style.margin = '0 auto';
   }, [svg]);
 
   useEffect(() => {
@@ -189,11 +202,11 @@ function MermaidZoomModal({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex flex-col bg-slate-900/70 p-6"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-6 lg:p-12"
       onClick={onClose}
     >
       <div
-        className="relative flex h-full flex-col overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl"
+        className="relative flex h-full max-h-full w-full max-w-[1500px] flex-col overflow-hidden rounded-xl border border-slate-300 bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white/90 px-4 py-2">

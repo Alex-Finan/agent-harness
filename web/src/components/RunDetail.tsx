@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   api,
   openEventStream,
@@ -614,15 +614,6 @@ function SprintView({
   // Plan column can take over the whole detail body so the user gets more
   // horizontal room when reading a long plan. Escape collapses.
   const [planExpanded, setPlanExpanded] = useState(false);
-  const [overviewEditing, setOverviewEditing] = useState(false);
-  const overviewSaverRef = useRef<(() => Promise<void>) | null>(null);
-  const [overviewSavePending, setOverviewSavePending] = useState(false);
-  const registerOverviewSaver = useCallback(
-    (fn: (() => Promise<void>) | null) => {
-      overviewSaverRef.current = fn;
-    },
-    []
-  );
   useEffect(() => {
     if (!focused || !detail.snapshot.sprints.some((s) => s.dirName === focused)) {
       setFocused(defaultFocus);
@@ -642,49 +633,6 @@ function SprintView({
 
   const tabRowActions = (
     <div className="flex shrink-0 items-center gap-1">
-      {tab === 'plan' ? (
-        <PlanEditButton runId={runId} planMd={planMd} />
-      ) : overviewMd !== null ? (
-        overviewEditing ? (
-          <>
-            <button
-              type="button"
-              onClick={() => setOverviewEditing(false)}
-              disabled={overviewSavePending}
-              className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                const save = overviewSaverRef.current;
-                if (!save) return;
-                setOverviewSavePending(true);
-                try {
-                  await save();
-                } catch {
-                  /* OverviewView surfaces the error in its own banner. */
-                } finally {
-                  setOverviewSavePending(false);
-                }
-              }}
-              disabled={overviewSavePending}
-              className="rounded border border-blue-700 bg-blue-700 px-2 py-0.5 text-xs font-medium text-white hover:bg-blue-600 disabled:opacity-60"
-            >
-              {overviewSavePending ? 'Saving…' : 'Save'}
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setOverviewEditing(true)}
-            className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-50"
-          >
-            Edit
-          </button>
-        )
-      ) : null}
       <button
         type="button"
         onClick={() => setPlanExpanded((v) => !v)}
@@ -719,9 +667,6 @@ function SprintView({
             overviewMd={overviewMd}
             pendingComments={pendingComments}
             onCommentFocus={setFocusedComment}
-            editing={overviewEditing}
-            onEditingChange={setOverviewEditing}
-            registerSaver={registerOverviewSaver}
           />
         ) : planMd ? (
           <InteractivePlanView
@@ -774,7 +719,15 @@ function SprintView({
           collapses. The overlay copies the same plan column so the layout is
           identical, just without the planner rail beside it. */}
       {planExpanded ? (
-        <div className="fixed inset-0 z-50 flex flex-col bg-white">
+        <>
+          {/* Dimmed backdrop behind the expanded panel. Clicking it collapses
+              the panel, same as Escape. */}
+          <div
+            className="fixed inset-0 z-40 bg-slate-900/40"
+            onClick={() => setPlanExpanded(false)}
+            aria-hidden
+          />
+          <div className="fixed inset-6 z-50 flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl lg:inset-10">
           <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
             <div className="flex items-center gap-1">
               {overviewMd !== null ? (
@@ -795,9 +748,6 @@ function SprintView({
                 overviewMd={overviewMd}
                 pendingComments={pendingComments}
                 onCommentFocus={setFocusedComment}
-                editing={overviewEditing}
-                onEditingChange={setOverviewEditing}
-                registerSaver={registerOverviewSaver}
               />
             ) : planMd ? (
               <InteractivePlanView
@@ -809,7 +759,8 @@ function SprintView({
               />
             ) : null}
           </div>
-        </div>
+          </div>
+        </>
       ) : null}
     </div>
   );

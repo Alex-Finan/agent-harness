@@ -76,6 +76,48 @@ function nodeGlyph(phase: PipPhase, n: number): string {
   return String(n);
 }
 
+/**
+ * Labelled execution / evaluation indicator. `E` = executor turn, `V` =
+ * verdict (evaluator). The letter inside makes the role obvious without
+ * hovering for a tooltip; the surrounding color carries the phase.
+ *
+ * Background-color comes from PIP_PHASE_CLASS; we add a contrasting text
+ * color so the letter remains readable on both filled and pending states.
+ */
+function rolePipTextClass(phase: PipPhase): string {
+  switch (phase) {
+    case 'pass':
+    case 'fail':
+    case 'done':
+    case 'running':
+      return 'text-white';
+    case 'contract':
+      return 'text-white';
+    case 'pending':
+    default:
+      return 'text-slate-500';
+  }
+}
+
+function RolePip({
+  letter,
+  phase,
+  ariaLabel
+}: {
+  letter: 'E' | 'V';
+  phase: PipPhase;
+  ariaLabel: string;
+}) {
+  return (
+    <span
+      aria-label={ariaLabel}
+      className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[8px] font-bold leading-none ${PIP_PHASE_CLASS[phase]} ${rolePipTextClass(phase)}`}
+    >
+      {letter}
+    </span>
+  );
+}
+
 export function SprintPath({
   pips,
   totalSprints,
@@ -94,9 +136,11 @@ export function SprintPath({
   const inPlanning = total === 0 || nextRole === 'planner';
 
   // Planner pill — always present on the left of the path. Reads as the entry
-  // node into the rail.
+  // node into the rail. Reserved spacers below the pill keep it aligned with
+  // the per-sprint columns (which have exec on top + node + eval on bottom).
   const plannerNode = (
     <div className="flex flex-col items-center gap-1">
+      <span className="h-4 w-4 opacity-0" aria-hidden />
       <span
         title={`Planner: ${PIP_PHASE_LABEL[plannerPhase]}`}
         aria-label={`planner ${PIP_PHASE_LABEL[plannerPhase]}`}
@@ -105,8 +149,7 @@ export function SprintPath({
       >
         plan
       </span>
-      <span className="h-2.5 w-2.5" />
-      <span className="h-2.5 w-2.5" />
+      <span className="h-4 w-4 opacity-0" aria-hidden />
     </div>
   );
 
@@ -143,16 +186,18 @@ export function SprintPath({
         className="flex shrink-0 flex-col items-center gap-1"
         title={tip}
       >
-        <span
-          aria-label={`sprint ${n} execution ${PIP_PHASE_LABEL[exec]}`}
-          className={`h-2.5 w-2.5 shrink-0 rounded-full ${PIP_PHASE_CLASS[exec]}`}
+        <RolePip
+          letter="E"
+          phase={exec}
+          ariaLabel={`sprint ${n} execution ${PIP_PHASE_LABEL[exec]}`}
         />
         <span className={nodeClass(node)} aria-label={`sprint ${n} ${PIP_PHASE_LABEL[node]}`}>
           {nodeGlyph(node, n)}
         </span>
-        <span
-          aria-label={`sprint ${n} evaluation ${PIP_PHASE_LABEL[evalPhase]}`}
-          className={`h-2.5 w-2.5 shrink-0 rounded-full ${PIP_PHASE_CLASS[evalPhase]}`}
+        <RolePip
+          letter="V"
+          phase={evalPhase}
+          ariaLabel={`sprint ${n} evaluation ${PIP_PHASE_LABEL[evalPhase]}`}
         />
       </div>
     );

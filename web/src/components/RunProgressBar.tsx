@@ -134,7 +134,11 @@ export function RunProgressBar({
             totalSprints={liveTotal}
             currentSprint={detail.state.current_sprint}
             nextRole={detail.state.next_role}
-            dispatching={detail.state.dispatching ?? null}
+            dispatching={
+            detail.dispatching && !detail.dispatching.finished
+              ? detail.dispatching.role
+              : null
+          }
           />
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-700">
@@ -142,7 +146,11 @@ export function RunProgressBar({
           {statusLine.showRoleBadge ? (
             <RoleBadge
               nextRole={detail.state.next_role}
-              dispatching={detail.state.dispatching ?? null}
+              dispatching={
+                detail.dispatching && !detail.dispatching.finished
+                  ? detail.dispatching.role
+                  : null
+              }
             />
           ) : null}
         </div>
@@ -165,7 +173,11 @@ export function RunProgressBar({
         {statusLine.showRoleBadge ? (
           <RoleBadge
             nextRole={detail.state.next_role}
-            dispatching={detail.state.dispatching ?? null}
+            dispatching={
+              detail.dispatching && !detail.dispatching.finished
+                ? detail.dispatching.role
+                : null
+            }
           />
         ) : null}
       </div>
