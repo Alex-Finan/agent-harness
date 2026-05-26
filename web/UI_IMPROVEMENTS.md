@@ -85,7 +85,7 @@ in playwright.
 **Cosmetic bug**
 
 - In the run header, target repo + branch render with no separator:
-  `/Users/alexanderfinan/sports_trading_algfeat/cpi-v3-conformal`. Need a
+  `/Users/you/Developer/some-repo/sub/path`. Need a
   space/divider.
 
 **Planning UI gaps**

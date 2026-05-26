@@ -14,7 +14,7 @@
 
 ## File map
 
-Files this plan creates (all under `/Users/alexfinan/Developer/agent-harness/`):
+Files this plan creates (all under `~/Developer/agent-harness/`):
 
 | Path | Responsibility |
 |---|---|
@@ -70,7 +70,7 @@ Files this plan creates (all under `/Users/alexfinan/Developer/agent-harness/`):
 
 - [ ] **Step 1: Write `package.json`**
 
-Create `/Users/alexfinan/Developer/agent-harness/package.json`:
+Create `~/Developer/agent-harness/package.json`:
 
 ```json
 {
@@ -178,7 +178,7 @@ export const VERSION = '0.1.0';
 
 Run:
 ```bash
-cd /Users/alexfinan/Developer/agent-harness
+cd ~/Developer/agent-harness
 npm install
 npm run build
 ```
@@ -187,7 +187,7 @@ Expected: `npm install` completes, `dist/src/index.js` exists.
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /Users/alexfinan/Developer/agent-harness
+cd ~/Developer/agent-harness
 git add package.json package-lock.json tsconfig.json jest.config.js .gitignore bin/ src/
 git commit -m "feat: repo bootstrap (package.json, tsconfig, jest, bin stub)"
 ```
@@ -2724,7 +2724,7 @@ Set `ANTHROPIC_API_KEY` in your env.
 
 ```bash
 # 1. Start a run
-RUN=$(harness init --repo ~/Developer/payabli-datalake --task "Add silver/vendor_address_clusters.py per RFC-004")
+RUN=$(harness init --repo ~/Developer/your-repo --task "Add the feature described in your task spec")
 echo "$RUN"
 
 # 2. Plan

@@ -101,7 +101,7 @@ export function RepoPicker({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onFocus={() => setOpen(true)}
-          placeholder="/Users/alex/Developer/payabli-datalake — or pick from list"
+          placeholder="/Users/you/Developer/your-repo — or pick from list"
           required
           disabled={disabled}
         />

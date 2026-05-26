@@ -134,7 +134,7 @@ A sprint is **never** its own PR. Sprints are the planner's way of breaking *one
 For larger features, chain runs together with `--base` so each PR branches off the previous one:
 
 ```bash
-ORIGIN=~/Developer/payabli-datalake
+ORIGIN=~/Developer/your-repo
 
 # PR #1 — bottom of the stack, branches off develop
 R1=$(harness init --repo "$ORIGIN" --base develop \
@@ -193,7 +193,7 @@ Native menus include **File → New Run** and **File → Open ~/.agent-harness**
 | `harness retry --run <id>` | Bump current role to re-run |
 | `harness finish --run <id> [--purge]` | Mark completed; optionally remove the worktree |
 | `harness abort --run <id> [--purge]` | Mark aborted; optionally remove the worktree |
-| `harness serve [--port N] [--host H]` | Start the local web UI |
+| `harness serve [--port N] [--host H]` | Start the local web UI (loopback by default; **see security note below before binding to non-loopback**) |
 | `harness mcp` | Run the MCP server (used by Claude Code, not directly by you) |
 
 ---
@@ -232,6 +232,12 @@ Everything is plain text or JSON — `cat`, `grep`, and your editor work fine fo
 - **Abort** from the UI
 
 ---
+
+## Security notes
+
+- **The web server has no authentication.** Default bind is `127.0.0.1`, which is safe — only your own machine can reach it. Do **not** bind to a non-loopback address (`--host 0.0.0.0`, your LAN IP, etc.) on an untrusted network: anyone reachable on that interface could trigger runs, spend your Anthropic API credit, and have the executor read or modify any local git repo on the host. Use an SSH tunnel if you need remote access.
+- **The executor writes to and commits in real git repos** you point it at. Use a worktree (`--base <branch>`) or a scratch clone unless you're comfortable with that.
+- **API keys** are read from `ANTHROPIC_API_KEY` or `~/.agent-harness/config.json` (`0600`). They are not sent anywhere except to the Anthropic API by the SDK.
 
 ## Design doc
 

@@ -17,7 +17,7 @@ The harness is the orchestrator. Claude is the worker. Files on disk are the onl
 - Not multi-user or multi-machine. One operator, one Mac, files on disk.
 - Not crash-recoverable beyond "resume from the last role boundary."
 - Not parallel. Sprints run sequentially. Roles never run concurrently.
-- Not domain-specific. Knows nothing about Payabli, the datalake, SQL, Python, etc. The planner figures out what the target repo needs.
+- Not domain-specific. Knows nothing about any particular stack, language, or codebase. The planner figures out what the target repo needs.
 
 ## 3. Roles
 
@@ -52,7 +52,7 @@ init  →  plan  →  for each sprint:
 ```json
 {
   "run_id": "2026-05-19-093712-ace1f3",
-  "target_repo": "/Users/alex/Developer/payabli-datalake",
+  "target_repo": "/Users/<user>/Developer/your-repo",
   "current_sprint": 2,
   "total_sprints": 5,
   "next_role": "evaluator",
