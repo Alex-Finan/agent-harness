@@ -29,7 +29,25 @@ export const StateSchema = z.object({
   base_branch: z.string().optional(),
   // When true the server should resume the auto-iterate loop after restart.
   // Defaults to false so old state.json files without this key parse cleanly.
-  auto_iterate: z.boolean().default(false)
+  auto_iterate: z.boolean().default(false),
+  // Run type discriminator. Defaults to 'standard' so old state.json files
+  // without this key parse cleanly.
+  run_type: z.enum(['standard', 'auto_research']).default('standard'),
+  // --- Auto-research fields (all optional so legacy state files parse) ---
+  /** Absolute path to the target repo / experiment directory. */
+  experiment_dir: z.string().optional(),
+  /** The optimization objective description (what to improve and how it is measured). */
+  objective: z.string().optional(),
+  /** Shell command to run to evaluate a trial (e.g. `bash run_experiment.sh`). */
+  evaluation_cmd: z.string().optional(),
+  /** Maximum number of trials to run. */
+  max_trials: z.number().int().positive().optional(),
+  /** Budget in minutes per trial. */
+  budget_minutes_per_trial: z.number().int().positive().optional(),
+  /** Number of trials completed so far. */
+  trials_completed: z.number().int().nonnegative().default(0),
+  /** Best composite metric (M) seen so far across all trials. */
+  best_metric: z.number().optional()
 });
 
 export type State = z.infer<typeof StateSchema>;

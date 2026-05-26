@@ -12,7 +12,7 @@ export type ServerEvent =
   | { type: 'verdict'; runId: string; sprint: string; verdictMd: string }
   | { type: 'transcript_append'; runId: string; logName: string; lines: unknown[] }
   | { type: 'transcript_reset'; runId: string; logName: string }
-  | { type: 'dispatch'; runId: string; role: 'planner' | 'next'; status: 'started' | 'finished' | 'error'; error?: string }
+  | { type: 'dispatch'; runId: string; role: 'planner' | 'next' | 'auto_research'; status: 'started' | 'finished' | 'error'; error?: string }
   | { type: 'cost'; runId: string; perRole: Record<string, number>; total: number }
   | { type: 'hello'; serverVersion: string };
 

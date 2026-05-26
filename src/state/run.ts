@@ -25,6 +25,18 @@ export interface CreateRunInput {
   /** Pre-allocated run id. Lets callers (e.g. `harness init --base`) reserve
    *  the id before this function runs so derived paths (worktrees) can use it. */
   runId?: string;
+  /** Run type — defaults to 'standard'. */
+  runType?: 'standard' | 'auto_research';
+  /** Auto-research: absolute path to the experiment directory. */
+  experimentDir?: string;
+  /** Auto-research: the optimization objective description. */
+  objective?: string;
+  /** Auto-research: shell command to evaluate a trial. */
+  evaluationCmd?: string;
+  /** Auto-research: maximum number of trials to run. */
+  maxTrials?: number;
+  /** Auto-research: budget in minutes per trial. */
+  budgetMinutesPerTrial?: number;
   /** Extra state fields merged into the initial state.json — used to persist
    *  worktree metadata (origin_repo, worktree_path, branch, base_branch). */
   extraState?: Partial<State>;
@@ -47,6 +59,13 @@ export async function createRun(input: CreateRunInput): Promise<Run> {
     created_at: now,
     updated_at: now,
     auto_iterate: false,
+    run_type: input.runType ?? 'standard',
+    ...(input.experimentDir !== undefined && { experiment_dir: input.experimentDir }),
+    ...(input.objective !== undefined && { objective: input.objective }),
+    ...(input.evaluationCmd !== undefined && { evaluation_cmd: input.evaluationCmd }),
+    ...(input.maxTrials !== undefined && { max_trials: input.maxTrials }),
+    ...(input.budgetMinutesPerTrial !== undefined && { budget_minutes_per_trial: input.budgetMinutesPerTrial }),
+    trials_completed: 0,
     ...input.extraState
   };
 

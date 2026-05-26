@@ -36,7 +36,14 @@ const InitBody = z.object({
   task: z.string().min(1),
   maxRetries: z.number().int().positive().default(3),
   base: z.string().optional(),
-  branch: z.string().optional()
+  branch: z.string().optional(),
+  // Auto-research fields
+  runType: z.enum(['standard', 'auto_research']).optional(),
+  experimentDir: z.string().optional(),
+  objective: z.string().optional(),
+  evaluationCmd: z.string().optional(),
+  maxTrials: z.number().int().positive().optional(),
+  budgetMinutesPerTrial: z.number().int().positive().optional()
 });
 
 const PlanBody = z.object({
@@ -142,13 +149,30 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
       reply.code(400);
       return { error: 'invalid body', issues: parsed.error.issues };
     }
-    const result = await dispatcher.createRun(parsed.data);
+    const { runType, experimentDir, objective, evaluationCmd, maxTrials, budgetMinutesPerTrial, ...baseArgs } = parsed.data;
+    const result = await dispatcher.createRun({
+      ...baseArgs,
+      ...(runType !== undefined && { runType }),
+      ...(experimentDir !== undefined && { experimentDir }),
+      ...(objective !== undefined && { objective }),
+      ...(evaluationCmd !== undefined && { evaluationCmd }),
+      ...(maxTrials !== undefined && { maxTrials }),
+      ...(budgetMinutesPerTrial !== undefined && { budgetMinutesPerTrial })
+    });
     // Surface a state event right after creation.
     try {
       const run = await loadRun(result.runId);
       bus.publish({ type: 'run_created', runId: result.runId, state: run.state });
     } catch {
       /* ignore */
+    }
+    // Auto-start the sweep when creating an auto_research run.
+    if (runType === 'auto_research') {
+      try {
+        await dispatcher.startAutoResearch(result.runId);
+      } catch {
+        /* non-fatal: the run is created; sweep can be started via the endpoint */
+      }
     }
     return result;
   });
@@ -231,6 +255,21 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
     }
     const handle = await dispatcher.startAutoIterate(id);
     return { runId: id, role: handle.role, startedAt: handle.startedAt };
+  });
+
+  app.post('/api/runs/:id/auto-research', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (dispatcher.isBusy(id)) {
+      reply.code(409);
+      return { error: 'run already has an in-flight role' };
+    }
+    try {
+      const handle = await dispatcher.startAutoResearch(id);
+      return { runId: id, role: handle.role, startedAt: handle.startedAt };
+    } catch (err) {
+      reply.code(400);
+      return { error: (err as Error).message };
+    }
   });
 
   app.post('/api/runs/:id/abort', async (req) => {

@@ -18,6 +18,19 @@ export interface InitArgs {
   /** Branch name for the worktree. Defaults to `harness/<run_id>` when
    *  --base is set; rejected when --base is omitted. */
   branch?: string;
+  // Auto-research fields
+  /** Run type. Defaults to 'standard'. */
+  runType?: 'standard' | 'auto_research';
+  /** Absolute path to the experiment directory (auto-research). */
+  experimentDir?: string;
+  /** Optimization objective description (auto-research). */
+  objective?: string;
+  /** Shell command to evaluate a trial (auto-research). */
+  evaluationCmd?: string;
+  /** Maximum number of trials to run (auto-research). */
+  maxTrials?: number;
+  /** Budget in minutes per trial (auto-research). */
+  budgetMinutesPerTrial?: number;
 }
 
 export interface InitResult {
@@ -43,7 +56,13 @@ export async function handleInit(args: InitArgs): Promise<InitResult> {
     const run = await createRun({
       targetRepo: originRepo,
       task: body,
-      maxRetries: args.maxRetries
+      maxRetries: args.maxRetries,
+      ...(args.runType !== undefined && { runType: args.runType }),
+      ...(args.experimentDir !== undefined && { experimentDir: args.experimentDir }),
+      ...(args.objective !== undefined && { objective: args.objective }),
+      ...(args.evaluationCmd !== undefined && { evaluationCmd: args.evaluationCmd }),
+      ...(args.maxTrials !== undefined && { maxTrials: args.maxTrials }),
+      ...(args.budgetMinutesPerTrial !== undefined && { budgetMinutesPerTrial: args.budgetMinutesPerTrial })
     });
     return { runId: run.state.run_id };
   }
@@ -73,6 +92,12 @@ export async function handleInit(args: InitArgs): Promise<InitResult> {
     targetRepo: wt.path,
     task: body,
     maxRetries: args.maxRetries,
+    ...(args.runType !== undefined && { runType: args.runType }),
+    ...(args.experimentDir !== undefined && { experimentDir: args.experimentDir }),
+    ...(args.objective !== undefined && { objective: args.objective }),
+    ...(args.evaluationCmd !== undefined && { evaluationCmd: args.evaluationCmd }),
+    ...(args.maxTrials !== undefined && { maxTrials: args.maxTrials }),
+    ...(args.budgetMinutesPerTrial !== undefined && { budgetMinutesPerTrial: args.budgetMinutesPerTrial }),
     extraState
   });
 

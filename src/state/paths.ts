@@ -74,3 +74,26 @@ export function plannerLogPath(runId: string): string {
 export function plannerReplyPath(runId: string): string {
   return path.join(runDir(runId), 'planner-reply.md');
 }
+
+// ---------------------------------------------------------------------------
+// Auto-research trial paths
+// ---------------------------------------------------------------------------
+
+function pad3(n: number): string {
+  return n.toString().padStart(3, '0');
+}
+
+/** Root directory that holds all trial sub-directories for a run. */
+export function trialsDir(runId: string): string {
+  return path.join(runDir(runId), 'trials');
+}
+
+/** Directory for a single trial (zero-padded 3-digit number). */
+export function trialDir(runId: string, trialNum: number): string {
+  return path.join(trialsDir(runId), pad3(trialNum));
+}
+
+/** Path to the result JSON file for a single trial. */
+export function trialResultPath(runId: string, trialNum: number): string {
+  return path.join(trialDir(runId, trialNum), 'result.json');
+}

@@ -12,10 +12,11 @@ import {
   appendUserEntry
 } from '../state/plannerLog.js';
 import { EventBus } from './events.js';
+import { runAutoResearchSweep } from './auto_research.js';
 
 export interface DispatchHandle {
   runId: string;
-  role: 'planner' | 'next';
+  role: 'planner' | 'next' | 'auto_research';
   startedAt: string;
   promise: Promise<void>;
   error?: string;
@@ -145,6 +146,34 @@ export class RunDispatcher {
   }
 
   /**
+   * Auto-research sweep: iterates up to max_trials times, launching a Claude
+   * session per trial, measuring the metric, and keeping or discarding changes
+   * via git. Unlike startAutoIterate this loop does NOT use the planner /
+   * executor / evaluator pipeline — it uses runAutoResearchSweep directly.
+   */
+  async startAutoResearch(runId: string): Promise<DispatchHandle> {
+    return this.start(runId, 'auto_research', async () => {
+      const run = await loadRun(runId);
+      const state = run.state;
+
+      if (state.run_type !== 'auto_research') {
+        throw new Error(`Run ${runId} is not an auto_research run (type: ${state.run_type})`);
+      }
+
+      const experimentDir = state.experiment_dir ?? state.target_repo;
+      const objective = state.objective ?? '';
+      const evaluationCmd = state.evaluation_cmd ?? 'bash run_experiment.sh';
+      const maxTrials = state.max_trials ?? 10;
+      const budgetMinutesPerTrial = state.budget_minutes_per_trial;
+
+      await runAutoResearchSweep(
+        { runId, experimentDir, objective, evaluationCmd, maxTrials, budgetMinutesPerTrial },
+        this.bus
+      );
+    });
+  }
+
+  /**
    * After a run finishes auto-iterate, look up whether it belongs to a stack
    * chain. If yes and the run reached status=completed, start auto-iterate on
    * the next ordered entry's runId. On halted/aborted, record the halt index
@@ -204,7 +233,7 @@ export class RunDispatcher {
 
   private async start(
     runId: string,
-    role: 'planner' | 'next',
+    role: 'planner' | 'next' | 'auto_research',
     fn: () => Promise<void>
   ): Promise<DispatchHandle> {
     if (this.isBusy(runId)) {
