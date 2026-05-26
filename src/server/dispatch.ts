@@ -1,9 +1,16 @@
+import * as fs from 'node:fs/promises';
 import { handlePlan, handlePlanRevise } from '../cli/commands/plan.js';
 import { handleNext } from '../cli/commands/next.js';
 import { handleInit, type InitArgs, type InitResult } from '../cli/commands/init.js';
 import { handleAbort } from '../cli/commands/abort.js';
 import { loadRun, saveState } from '../state/run.js';
 import { findStackContaining, writeStack } from '../state/stack.js';
+import { planPath, overviewPath } from '../state/paths.js';
+import { readSprints } from './readers.js';
+import {
+  appendPlannerEntry,
+  appendUserEntry
+} from '../state/plannerLog.js';
 import { EventBus } from './events.js';
 
 export interface DispatchHandle {
@@ -42,8 +49,36 @@ export class RunDispatcher {
     return this.start(runId, 'next', () => handleNext({ runId }));
   }
 
-  async startPlanRevise(runId: string, revisionMessage: string): Promise<DispatchHandle> {
-    return this.start(runId, 'planner', () => handlePlanRevise({ runId, revisionMessage }));
+  async startPlanRevise(
+    runId: string,
+    revisionMessage: string,
+    pendingCommentCount = 0
+  ): Promise<DispatchHandle> {
+    // Persist the user's turn in the durable planner log BEFORE dispatching so
+    // the message survives even if the planner errors. Snapshot the docs so
+    // we can summarise what concretely changed once it finishes.
+    const trimmed = revisionMessage.trim();
+    const before = await snapshotPlannerDocs(runId);
+    try {
+      await appendUserEntry(runId, trimmed, pendingCommentCount);
+    } catch {
+      /* Best-effort — never block dispatch on a log write. */
+    }
+
+    return this.start(runId, 'planner', async () => {
+      let failed = false;
+      try {
+        await handlePlanRevise({ runId, revisionMessage });
+      } catch (err) {
+        failed = true;
+        // Re-throw so DispatchHandle.error is populated as usual.
+        await writePlannerSummary(runId, before, true).catch(() => {});
+        throw err;
+      }
+      if (!failed) {
+        await writePlannerSummary(runId, before, false).catch(() => {});
+      }
+    });
   }
 
   /**
@@ -242,4 +277,65 @@ export class RunDispatcher {
     });
     return { ok: true };
   }
+}
+
+/**
+ * Snapshot the planner-controlled files for diffing. Used to summarise what
+ * the planner changed once a /plan/revise dispatch finishes, so the right-rail
+ * conversation can show a meaningful "planner replied" entry.
+ */
+async function snapshotPlannerDocs(runId: string): Promise<{
+  planMd: string;
+  overviewMd: string;
+  sprintCount: number;
+  pendingCommentCount: number;
+}> {
+  const [planMd, overviewMd, sprints] = await Promise.all([
+    readFileOrEmpty(planPath(runId)),
+    readFileOrEmpty(overviewPath(runId)),
+    readSprints(runId).catch(() => [])
+  ]);
+  // pendingCommentCount is informational only — we read it lazily from
+  // readers.ts upstream when assembling the log entry; here it's zero by
+  // default and the API endpoint passes the real value in via a separate
+  // appendUserEntry call when needed.
+  return { planMd, overviewMd, sprintCount: sprints.length, pendingCommentCount: 0 };
+}
+
+async function readFileOrEmpty(p: string): Promise<string> {
+  try {
+    return await fs.readFile(p, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+async function writePlannerSummary(
+  runId: string,
+  before: { planMd: string; overviewMd: string; sprintCount: number },
+  failed: boolean
+): Promise<void> {
+  if (failed) {
+    await appendPlannerEntry(
+      runId,
+      'Planner failed before producing a response. Check the run log for details.',
+      true
+    );
+    return;
+  }
+  const after = await snapshotPlannerDocs(runId);
+  const parts: string[] = [];
+  if (before.planMd !== after.planMd) parts.push('updated plan.md');
+  if (before.overviewMd !== after.overviewMd) parts.push('updated overview.md');
+  const delta = after.sprintCount - before.sprintCount;
+  if (delta > 0) parts.push(`added ${delta} sprint${delta === 1 ? '' : 's'}`);
+  else if (delta < 0) {
+    const removed = -delta;
+    parts.push(`removed ${removed} sprint${removed === 1 ? '' : 's'}`);
+  }
+  const text =
+    parts.length === 0
+      ? 'Planner finished but didn’t change any files. Try rephrasing the question or adding more context.'
+      : `Planner ${parts.join(', ')}. Review the plan column for the new state.`;
+  await appendPlannerEntry(runId, text, false);
 }

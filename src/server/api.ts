@@ -219,7 +219,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
       reply.code(400);
       return { error: 'revision needs either a message or at least one pending comment' };
     }
-    const handle = await dispatcher.startPlanRevise(id, parsed.data.message);
+    const handle = await dispatcher.startPlanRevise(id, parsed.data.message, pending.length);
     return { runId: id, role: handle.role, startedAt: handle.startedAt };
   });
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   api,
   openEventStream,
@@ -14,14 +14,15 @@ import { ExpandablePanel } from './ExpandablePanel';
 import { PendingCommentsPanel } from './PendingCommentsPanel';
 import { StackPanel } from './StackPanel';
 import { RunProgressBar } from './RunProgressBar';
-import { SprintFocus, useDefaultFocus } from './SprintTimeline';
+import { useDefaultFocus } from './SprintTimeline';
+import { PlannerRail } from './PlannerRail';
 import { PlanChat } from './PlanChat';
 import { RunStatusChip, computeChipState } from './RunStatusChip';
 import { ActivityLine } from './ActivityLine';
 import { FailureBanner } from './FailureBanner';
 import { RevisePlanPanel } from './RevisePlanPanel';
 import { InteractivePlanView } from './InteractivePlanView';
-import { formatCost, formatRelative } from '../lib/format';
+import { formatCost, formatRelative, formatTaskTitle } from '../lib/format';
 
 /**
  * A run is in the "planning phase" until the planner writes the first contract.md.
@@ -260,7 +261,7 @@ export function RunDetail({
               className="mt-2.5 truncate text-xl font-semibold text-blue-950"
               title={s.task_summary}
             >
-              {s.task_summary}
+              {formatTaskTitle(s.task_summary)}
             </h1>
             <ActivityLine
               runId={s.run_id}
@@ -322,33 +323,51 @@ export function RunDetail({
           </div>
         </div>
       </header>
-      <div className="flex-1 overflow-y-auto p-4">
-        {detail.snapshot.stack ? (
-          <div className="mb-4">
-            <StackPanel
-              runId={detail.state.run_id}
-              stack={detail.snapshot.stack}
-              onOpenRun={onSelectRun}
-            />
-          </div>
-        ) : null}
-        {isPlanningPhase(detail) ? (
-          <PlanningView
-            detail={detail}
+      {detail.snapshot.planMd === null ? (
+        <div className="flex-1 overflow-y-auto p-4">
+          {detail.snapshot.stack ? (
+            <div className="mb-4">
+              <StackPanel
+                runId={detail.state.run_id}
+                stack={detail.snapshot.stack}
+                onOpenRun={onSelectRun}
+              />
+            </div>
+          ) : null}
+          <NoPlanEmptyState
+            taskMd={detail.snapshot.taskMd}
             canPlan={!!canPlan}
             onPlan={startPlan}
+            dispatchingActive={!!detail.dispatching && !detail.dispatching.finished}
             busy={busy}
           />
-        ) : (
-          <SprintView detail={detail} allRuns={allRuns} onSelectRun={onSelectRun} />
-        )}
-      </div>
+        </div>
+      ) : (
+        <SprintView
+          detail={detail}
+          allRuns={allRuns}
+          onSelectRun={onSelectRun}
+          stackHeader={
+            detail.snapshot.stack ? (
+              <StackPanel
+                runId={detail.state.run_id}
+                stack={detail.snapshot.stack}
+                onOpenRun={onSelectRun}
+              />
+            ) : null
+          }
+        />
+      )}
       {sprintRows.length > 0 ? null : null}
     </div>
   );
 }
 
-function PlanningView({
+// Retained for legacy reference — the unified SprintView now handles the
+// plan-refinement phase too. Kept un-exported and unused so callers that
+// previously rendered it now go through SprintView instead.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _PlanningView({
   detail,
   canPlan,
   onPlan,
@@ -572,11 +591,13 @@ function extractTaskPrompt(md: string | null): string | null {
 function SprintView({
   detail,
   allRuns,
-  onSelectRun
+  onSelectRun,
+  stackHeader
 }: {
   detail: RunDetailT;
   allRuns: RunState[];
   onSelectRun?: (id: string) => void;
+  stackHeader?: ReactNode;
 }) {
   const dispatchingActive = !!(detail.dispatching && !detail.dispatching.finished);
   const runId = detail.state.run_id;
@@ -590,109 +611,210 @@ function SprintView({
   // so the authoritative narrative stays the front door for the entire run,
   // not just the planning phase.
   const [tab, setTab] = useState<'overview' | 'plan'>(overviewMd ? 'overview' : 'plan');
+  // Plan column can take over the whole detail body so the user gets more
+  // horizontal room when reading a long plan. Escape collapses.
+  const [planExpanded, setPlanExpanded] = useState(false);
+  const [overviewEditing, setOverviewEditing] = useState(false);
+  const overviewSaverRef = useRef<(() => Promise<void>) | null>(null);
+  const [overviewSavePending, setOverviewSavePending] = useState(false);
+  const registerOverviewSaver = useCallback(
+    (fn: (() => Promise<void>) | null) => {
+      overviewSaverRef.current = fn;
+    },
+    []
+  );
   useEffect(() => {
     if (!focused || !detail.snapshot.sprints.some((s) => s.dirName === focused)) {
       setFocused(defaultFocus);
     }
   }, [defaultFocus, focused, detail.snapshot.sprints]);
+  useEffect(() => {
+    if (!planExpanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable)) return;
+      setPlanExpanded(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [planExpanded]);
 
-  const focusedSprint =
-    detail.snapshot.sprints.find((s) => s.dirName === focused) ??
-    detail.snapshot.sprints[0] ??
-    null;
-
-  return (
-    <div className="flex flex-col gap-4">
-      {/* Top-of-view progress strip — appears once the planner has produced
-          contracts. Single-PR runs show their sprint pips; stacked runs show
-          one segment per PR with click-to-jump for siblings. */}
-      <RunProgressBar detail={detail} allRuns={allRuns} onSelectRun={onSelectRun} />
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <ExpandablePanel
-          collapsedClassName="panel flex max-h-[70vh] flex-col overflow-hidden"
-          header={() => (
-            <>
-              <div className="flex items-center gap-1">
-                {overviewMd !== null ? (
-                  <TabButton
-                    active={tab === 'overview'}
-                    onClick={() => setTab('overview')}
-                  >
-                    overview.md
-                  </TabButton>
-                ) : null}
-                <TabButton active={tab === 'plan'} onClick={() => setTab('plan')}>
-                  plan.md
-                </TabButton>
-              </div>
-              <div className="ml-auto">
-                {tab === 'plan' ? (
-                  <PlanEditButton runId={runId} planMd={planMd} />
-                ) : null}
-              </div>
-            </>
-          )}
-        >
-          {tab === 'overview' && overviewMd !== null ? (
-            <OverviewView
-              runId={runId}
-              overviewMd={overviewMd}
-              pendingComments={pendingComments}
-              onCommentFocus={setFocusedComment}
-            />
-          ) : planMd ? (
-            <InteractivePlanView
-              planMd={planMd}
-              detail={detail}
-              focusedDirName={focused}
-              onFocus={setFocused}
-              onCommentFocus={setFocusedComment}
-            />
-          ) : (
-            <div className="px-4 py-6 text-sm text-slate-500">
-              No plan yet.
-            </div>
-          )}
-        </ExpandablePanel>
-
-        <div className="max-h-[70vh]">
-          {focusedSprint ? (
-            <SprintFocus
-              runId={runId}
-              sprint={focusedSprint}
-              detail={detail}
-              onCommentFocus={setFocusedComment}
-            />
-          ) : (
-            <div className="panel px-4 py-6 text-sm text-slate-500">
-              No sprint to focus yet — the planner produces sprint directories before the executor runs.
-            </div>
-          )}
-        </div>
-      </div>
-
-      {pendingComments.length > 0 ? (
-        <PendingCommentsPanel
-          runId={runId}
-          comments={pendingComments}
-          focusedId={focusedComment}
-        />
+  const tabRowActions = (
+    <div className="flex shrink-0 items-center gap-1">
+      {tab === 'plan' ? (
+        <PlanEditButton runId={runId} planMd={planMd} />
+      ) : overviewMd !== null ? (
+        overviewEditing ? (
+          <>
+            <button
+              type="button"
+              onClick={() => setOverviewEditing(false)}
+              disabled={overviewSavePending}
+              className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                const save = overviewSaverRef.current;
+                if (!save) return;
+                setOverviewSavePending(true);
+                try {
+                  await save();
+                } catch {
+                  /* OverviewView surfaces the error in its own banner. */
+                } finally {
+                  setOverviewSavePending(false);
+                }
+              }}
+              disabled={overviewSavePending}
+              className="rounded border border-blue-700 bg-blue-700 px-2 py-0.5 text-xs font-medium text-white hover:bg-blue-600 disabled:opacity-60"
+            >
+              {overviewSavePending ? 'Saving…' : 'Save'}
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setOverviewEditing(true)}
+            className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-50"
+          >
+            Edit
+          </button>
+        )
       ) : null}
+      <button
+        type="button"
+        onClick={() => setPlanExpanded((v) => !v)}
+        className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-50"
+        title={planExpanded ? 'Collapse (Esc)' : 'Expand to fullscreen'}
+        aria-label={planExpanded ? 'Collapse' : 'Expand'}
+      >
+        {planExpanded ? '⤡' : '⤢'}
+      </button>
+    </div>
+  );
 
-      {/* Revise plan — sticky to the bottom of the viewport so it's always
-          reachable even on long plans / long sprint detail. Subtle ring +
-          backdrop separates it from scrolled content above. */}
-      <div className="sticky bottom-0 z-10 -mx-4 -mb-4 border-t border-slate-200 bg-white/90 px-4 py-3 backdrop-blur">
-        <RevisePlanPanel
-          runId={runId}
-          planMd={planMd}
-          busy={dispatchingActive}
-          pendingCommentCount={pendingComments.length}
-        />
+  const planColumn = (
+    <div className="flex h-full min-h-0 flex-col bg-white lg:border-r lg:border-slate-200">
+      <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-2">
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          {overviewMd !== null ? (
+            <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>
+              overview.md
+            </TabButton>
+          ) : null}
+          <TabButton active={tab === 'plan'} onClick={() => setTab('plan')}>
+            plan.md
+          </TabButton>
+        </div>
+        {tabRowActions}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {tab === 'overview' && overviewMd !== null ? (
+          <OverviewView
+            runId={runId}
+            overviewMd={overviewMd}
+            pendingComments={pendingComments}
+            onCommentFocus={setFocusedComment}
+            editing={overviewEditing}
+            onEditingChange={setOverviewEditing}
+            registerSaver={registerOverviewSaver}
+          />
+        ) : planMd ? (
+          <InteractivePlanView
+            planMd={planMd}
+            detail={detail}
+            focusedDirName={focused}
+            onFocus={setFocused}
+            onCommentFocus={setFocusedComment}
+          />
+        ) : (
+          <div className="px-4 py-6 text-sm text-slate-500">No plan yet.</div>
+        )}
       </div>
     </div>
   );
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Fixed top region: stack panel (if any) + progress bar. Both stay
+          visible above the split so they don't compete with plan/planner. */}
+      {stackHeader ? <div className="border-b border-slate-200 px-4 py-3">{stackHeader}</div> : null}
+      <div className="border-b border-slate-200 px-4 py-3">
+        <RunProgressBar detail={detail} allRuns={allRuns} onSelectRun={onSelectRun} />
+      </div>
+
+      {/* Two-column workspace: plan.md (with inline sprint contracts) on the
+          left, persistent PlannerRail on the right. Each column manages its
+          own scroll so they're independent. When the plan column is expanded
+          the right rail collapses entirely to give the plan the full width. */}
+      <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        {planColumn}
+        <PlannerRail
+          detail={detail}
+          busy={dispatchingActive}
+          canAuto={!dispatchingActive && detail.state.status === 'in_progress' && detail.state.next_role !== 'done'}
+          onStartAuto={async () => {
+            try {
+              await api.startAuto(runId);
+            } catch {
+              /* surfaced via PlannerRail's own error state when used; the
+                 outer header's startAuto path is the primary surface for
+                 dispatch failures. */
+            }
+          }}
+        />
+      </div>
+
+      {/* Fullscreen plan overlay — covers the entire viewport (above the top
+          bar and run header) when the Expand button is clicked. Escape
+          collapses. The overlay copies the same plan column so the layout is
+          identical, just without the planner rail beside it. */}
+      {planExpanded ? (
+        <div className="fixed inset-0 z-50 flex flex-col bg-white">
+          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
+            <div className="flex items-center gap-1">
+              {overviewMd !== null ? (
+                <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>
+                  overview.md
+                </TabButton>
+              ) : null}
+              <TabButton active={tab === 'plan'} onClick={() => setTab('plan')}>
+                plan.md
+              </TabButton>
+            </div>
+            {tabRowActions}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {tab === 'overview' && overviewMd !== null ? (
+              <OverviewView
+                runId={runId}
+                overviewMd={overviewMd}
+                pendingComments={pendingComments}
+                onCommentFocus={setFocusedComment}
+                editing={overviewEditing}
+                onEditingChange={setOverviewEditing}
+                registerSaver={registerOverviewSaver}
+              />
+            ) : planMd ? (
+              <InteractivePlanView
+                planMd={planMd}
+                detail={detail}
+                focusedDirName={focused}
+                onFocus={setFocused}
+                onCommentFocus={setFocusedComment}
+              />
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
+
 
 /**
  * Edit button inline in the plan header — opens the full PlanEditor for
@@ -705,11 +827,11 @@ function PlanEditButton({ runId, planMd }: { runId: string; planMd: string | nul
   return (
     <>
       <button
-        className="text-xs text-slate-600 hover:text-blue-700"
+        className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-50"
         onClick={() => setOpen(true)}
         title="Edit plan.md directly"
       >
-        edit raw ↗
+        Edit
       </button>
       {open ? (
         <div

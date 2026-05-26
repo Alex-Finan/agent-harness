@@ -84,6 +84,15 @@ export interface RunSnapshot {
   logFiles: string[];
   pendingComments: PendingComment[];
   stack: Stack | null;
+  conversation: ConversationEntry[];
+}
+
+export interface ConversationEntry {
+  at: string;
+  role: 'user' | 'planner';
+  text: string;
+  comments?: number;
+  failed?: boolean;
 }
 
 export interface RoleCost {

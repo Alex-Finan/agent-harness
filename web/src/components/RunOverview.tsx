@@ -1,6 +1,5 @@
 import type { RunState } from '../api';
-import { formatCost, formatRelative } from '../lib/format';
-import { SprintPips } from './SprintPips';
+import { formatCost, formatRelative, formatTaskTitle } from '../lib/format';
 import { RunStatusChip, computeChipState, type ChipState } from './RunStatusChip';
 
 /**
@@ -150,7 +149,7 @@ function RunTile({ run: r, onSelect }: { run: RunState; onSelect: (id: string) =
 
       <div className="min-w-0">
         <div className="line-clamp-2 text-sm font-medium text-slate-900">
-          {r.task_summary || '(no task summary)'}
+          {formatTaskTitle(r.task_summary) || '(no task summary)'}
         </div>
         {r.branch ? (
           <div className="mt-1 truncate font-mono text-[10px] text-slate-500">
@@ -159,21 +158,14 @@ function RunTile({ run: r, onSelect }: { run: RunState; onSelect: (id: string) =
         ) : null}
       </div>
 
-      <div className="flex items-end justify-between gap-2 pt-1">
-        <div className="flex flex-col gap-1">
-          <SprintPips
-            pips={r.sprint_pips ?? []}
-            totalSprints={totalSprints}
-            currentSprint={r.current_sprint}
-            nextRole={r.next_role}
-            dispatching={!!r.dispatching}
-          />
-          {totalSprints > 0 ? (
-            <span className="text-[10px] uppercase tracking-wide text-slate-500">
-              {`${completedSprints}/${totalSprints} sprint${totalSprints === 1 ? '' : 's'} passed`}
-            </span>
-          ) : null}
-        </div>
+      <div className="flex items-center justify-between gap-2 pt-1">
+        {totalSprints > 0 ? (
+          <span className="text-[10px] uppercase tracking-wide text-slate-500">
+            {`${completedSprints}/${totalSprints} sprint${totalSprints === 1 ? '' : 's'} passed`}
+          </span>
+        ) : (
+          <span />
+        )}
         {r.cost_total_usd && r.cost_total_usd > 0 ? (
           <span className="text-xs tabular-nums text-emerald-600/80">
             {formatCost(r.cost_total_usd)}

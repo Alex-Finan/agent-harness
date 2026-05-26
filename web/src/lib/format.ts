@@ -35,6 +35,19 @@ export function formatRelative(iso: string): string {
   return `${d}d ago`;
 }
 
+/**
+ * Strip markdown chrome off a task title so it reads as plain text in chips
+ * and headers. Removes leading `#` characters and the boilerplate "Task —"
+ * prefix that originates from the `# Task — <title>` convention.
+ */
+export function formatTaskTitle(s: string | null | undefined): string {
+  if (!s) return '';
+  return s
+    .replace(/^\s*#+\s*/, '')
+    .replace(/^Task\s*[—:-]\s*/i, '')
+    .trim();
+}
+
 export function formatTokens(n: number | null | undefined): string {
   if (n === null || n === undefined) return '—';
   if (n < 1000) return `${n}`;

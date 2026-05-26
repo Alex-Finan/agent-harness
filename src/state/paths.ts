@@ -61,3 +61,7 @@ export function sprintArtifactPath(
 export function logsDir(runId: string): string {
   return path.join(runDir(runId), 'logs');
 }
+
+export function plannerLogPath(runId: string): string {
+  return path.join(runDir(runId), 'planner-log.jsonl');
+}

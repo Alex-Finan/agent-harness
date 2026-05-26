@@ -12,6 +12,7 @@ import {
 import { parseVerdict } from '../state/artifacts.js';
 import { readPendingComments, type PendingComment } from '../state/pendingComments.js';
 import { readStack, type Stack } from '../state/stack.js';
+import { readPlannerLog, type ConversationEntry } from '../state/plannerLog.js';
 
 export interface SprintSnapshot {
   dirName: string;
@@ -34,6 +35,8 @@ export interface RunSnapshot {
   logFiles: string[];
   pendingComments: PendingComment[];
   stack: Stack | null;
+  /** Durable user ↔ planner conversation log, oldest first. */
+  conversation: ConversationEntry[];
 }
 
 /**
@@ -185,7 +188,17 @@ export async function readRunSnapshot(runId: string): Promise<RunSnapshot> {
   } catch {
     /* logs dir may not exist yet */
   }
-  return { taskMd, overviewMd, planMd, sprints, logFiles, pendingComments, stack };
+  const conversation = await readPlannerLog(runId);
+  return {
+    taskMd,
+    overviewMd,
+    planMd,
+    sprints,
+    logFiles,
+    pendingComments,
+    stack,
+    conversation
+  };
 }
 
 export async function readTranscript(runId: string, logName: string): Promise<{ lines: unknown[]; raw: string }> {

@@ -1,5 +1,6 @@
 import type { RunDetail, RunState, SprintPip, SprintSnapshot } from '../api';
 import { SprintPips } from './SprintPips';
+import { SprintPath } from './SprintPath';
 import { RoleBadge } from './RoleBadge';
 import { parsePlanSections } from '../lib/plan-diff';
 
@@ -118,23 +119,25 @@ export function RunProgressBar({
 
   if (!isStacked) {
     return (
-      <div className="mb-3 rounded-md border border-slate-200 bg-white px-3 py-2">
-        <div className="flex items-center gap-3">
+      <div className="mb-3 rounded-md border border-slate-200 bg-white px-3 py-3">
+        <div className="flex items-center justify-between">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
             Progress
           </span>
-          <SprintPips
+          <span className="text-[11px] tabular-nums text-slate-500">
+            {livePassed}/{liveTotal} sprint{liveTotal === 1 ? '' : 's'} passed
+          </span>
+        </div>
+        <div className="mt-2 py-1">
+          <SprintPath
             pips={livePips}
             totalSprints={liveTotal}
             currentSprint={detail.state.current_sprint}
             nextRole={detail.state.next_role}
-            dispatching={!!detail.state.dispatching}
+            dispatching={detail.state.dispatching ?? null}
           />
-          <span className="ml-auto text-[11px] tabular-nums text-slate-500">
-            {livePassed}/{liveTotal} sprint{liveTotal === 1 ? '' : 's'} passed
-          </span>
         </div>
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-700">
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-700">
           <span>{statusLine.text}</span>
           {statusLine.showRoleBadge ? (
             <RoleBadge
@@ -231,7 +234,7 @@ function PrSegment({
         totalSprints={total}
         currentSprint={detail.state.current_sprint}
         nextRole={detail.state.next_role}
-        dispatching={!!detail.state.dispatching}
+        dispatching={detail.state.dispatching ?? null}
       />
     );
   } else if (sibling) {
@@ -245,7 +248,7 @@ function PrSegment({
         totalSprints={total}
         currentSprint={sibling.current_sprint}
         nextRole={sibling.next_role}
-        dispatching={!!sibling.dispatching}
+        dispatching={sibling.dispatching ?? null}
       />
     );
   } else if (spawned) {

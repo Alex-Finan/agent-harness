@@ -73,16 +73,30 @@ export function CommentableMarkdown({
     const container = containerRef.current;
     if (!container) return;
 
-    function onMouseUp() {
+    /**
+     * A selection counts as "ours" if either endpoint sits inside the
+     * markdown container. This is more forgiving than checking
+     * `commonAncestorContainer`, which escapes the container the moment the
+     * drag crosses past the markdown bounds (common with quick drags that
+     * end in margin / padding area).
+     */
+    function selectionIntersectsContainer(range: Range): boolean {
+      if (!container) return false;
+      return (
+        container.contains(range.startContainer) ||
+        container.contains(range.endContainer) ||
+        range.commonAncestorContainer === container
+      );
+    }
+
+    function evaluateSelection() {
       const sel = window.getSelection();
-      if (!sel || sel.isCollapsed) {
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
         setPending(null);
         return;
       }
-      // Require selection to be entirely inside our container.
       const range = sel.getRangeAt(0);
-      if (!container) return;
-      if (!container.contains(range.commonAncestorContainer)) {
+      if (!selectionIntersectsContainer(range)) {
         setPending(null);
         return;
       }
@@ -93,7 +107,6 @@ export function CommentableMarkdown({
       }
       const anchor = locateAnchor(effectiveAnchorSource, text);
       if (!anchor) {
-        // Couldn't map the selection back to source. Skip silently.
         setPending(null);
         return;
       }
@@ -104,13 +117,11 @@ export function CommentableMarkdown({
       });
     }
 
-    function onSelectionChange() {
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed) {
-        // Selection went away (e.g. user clicked somewhere else). Drop the
-        // pill so it can't hover over unrelated UI like header buttons.
-        setPending(null);
-      }
+    function onMouseUp() {
+      // rAF lets the browser finalise the selection (Chrome occasionally
+      // flips isCollapsed momentarily right around mouseup); evaluating one
+      // frame later avoids that race.
+      window.requestAnimationFrame(evaluateSelection);
     }
 
     function onScroll() {
@@ -118,6 +129,7 @@ export function CommentableMarkdown({
       // it doesn't drift over unrelated UI like tab strips or page headers.
       setPending(null);
     }
+
     function onMouseDownAnywhere(e: MouseEvent) {
       if (!container) return;
       const target = e.target as Node | null;
@@ -131,12 +143,10 @@ export function CommentableMarkdown({
     }
 
     document.addEventListener('mouseup', onMouseUp);
-    document.addEventListener('selectionchange', onSelectionChange);
     document.addEventListener('mousedown', onMouseDownAnywhere, true);
     window.addEventListener('scroll', onScroll, true);
     return () => {
       document.removeEventListener('mouseup', onMouseUp);
-      document.removeEventListener('selectionchange', onSelectionChange);
       document.removeEventListener('mousedown', onMouseDownAnywhere, true);
       window.removeEventListener('scroll', onScroll, true);
     };

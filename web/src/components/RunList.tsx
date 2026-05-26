@@ -1,7 +1,19 @@
 import type { RunState } from '../api';
-import { formatCost, formatRelative } from '../lib/format';
-import { SprintPips } from './SprintPips';
+import { formatCost, formatRelative, formatTaskTitle } from '../lib/format';
 import { computeChipState, type ChipState } from './RunStatusChip';
+
+/**
+ * Short repo label for the sidebar grouping. Prefer the origin repo (a
+ * filesystem path or git URL) and reduce to its trailing path segment so the
+ * sidebar shows `the-oracle` rather than the full `/Users/.../the-oracle`.
+ */
+function repoLabel(r: RunState): string | null {
+  const raw = r.origin_repo || r.target_repo;
+  if (!raw) return null;
+  const trimmed = raw.replace(/\.git$/, '').replace(/[\\/]+$/, '');
+  const tail = trimmed.split(/[\\/]/).pop();
+  return tail || trimmed;
+}
 
 /**
  * Color of the left selection border when a row is active. Chip state colors
@@ -31,7 +43,21 @@ function RunRow({
     dispatchingActive: !!r.dispatching
   });
   const isLive = chip === 'running';
-  const totalSprints = Math.max(r.total_sprints, r.sprint_pips?.length ?? 0);
+
+  // Human-readable label for the row's secondary text. Live runs show
+  // "Sprint N · execution" / "Sprint N · evaluation" so an operator can see
+  // sprint progress and phase without opening the run. Planner/done collapse
+  // to a single word — there is no sprint number to attach.
+  let roleLabel: string;
+  if (chip === 'halted') roleLabel = 'failed';
+  else if (chip === 'completed') roleLabel = 'done';
+  else if (chip === 'aborted') roleLabel = 'aborted';
+  else if (r.next_role === 'planner') roleLabel = isLive ? 'planning…' : 'planning';
+  else if (r.next_role === 'done') roleLabel = 'done';
+  else {
+    const phase = r.next_role === 'evaluator' ? 'evaluation' : 'execution';
+    roleLabel = `Sprint ${r.current_sprint} · ${phase}${isLive ? '…' : ''}`;
+  }
 
   return (
     <li
@@ -50,48 +76,23 @@ function RunRow({
           className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900"
           title={r.task_summary}
         >
-          {r.task_summary || '(no task summary)'}
+          {formatTaskTitle(r.task_summary) || '(no task summary)'}
         </span>
         <span className="shrink-0 text-[10px] tabular-nums text-slate-500">
           {formatRelative(r.updated_at)}
         </span>
       </div>
-      {/* Row 2: sprint pips + role label + branch + cost. The pip strip
-          carries the count; no separate "3/5". */}
+      {/* Row 2: role label + branch + cost. The detail view carries the full
+          progress visualisation — the sidebar stays terse on purpose. */}
       <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500">
-        <SprintPips
-          pips={r.sprint_pips ?? []}
-          totalSprints={totalSprints}
-          currentSprint={r.current_sprint}
-          nextRole={r.next_role}
-          dispatching={isLive}
-        />
         <span className="truncate" title={`next: ${r.next_role}`}>
-          {chip === 'halted'
-            ? 'failed'
-            : chip === 'completed'
-              ? 'done'
-              : chip === 'aborted'
-                ? 'aborted'
-                : isLive
-                  ? `${r.dispatching}…`
-                  : r.next_role}
+          {roleLabel}
         </span>
-        <span className="ml-auto flex shrink-0 items-center gap-2">
-          {r.base_branch ? (
-            <span
-              className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[10px] text-slate-600"
-              title={`base branch: ${r.base_branch}`}
-            >
-              ⎇ {r.base_branch}
-            </span>
-          ) : null}
-          {r.cost_total_usd && r.cost_total_usd > 0 ? (
-            <span className="tabular-nums text-emerald-600/80">
-              {formatCost(r.cost_total_usd)}
-            </span>
-          ) : null}
-        </span>
+        {r.cost_total_usd && r.cost_total_usd > 0 ? (
+          <span className="ml-auto shrink-0 tabular-nums text-emerald-600/80">
+            {formatCost(r.cost_total_usd)}
+          </span>
+        ) : null}
       </div>
     </li>
   );
@@ -122,17 +123,16 @@ export function RunList({
   ).length;
   const haltedCount = activeRuns.filter((r) => r.status === 'halted').length;
 
-  // Group active runs by base_branch. Runs without base_branch go into the
-  // ungrouped bucket and are rendered with no section header.
+  // Group active runs by repo. Runs without a repo (shouldn't normally happen)
+  // fall into the ungrouped bucket and render without a section header.
   const groupMap = new Map<string, RunState[]>();
   const ungrouped: RunState[] = [];
 
   for (const r of activeRuns) {
-    if (r.base_branch) {
-      if (!groupMap.has(r.base_branch)) {
-        groupMap.set(r.base_branch, []);
-      }
-      groupMap.get(r.base_branch)!.push(r);
+    const repo = repoLabel(r);
+    if (repo) {
+      if (!groupMap.has(repo)) groupMap.set(repo, []);
+      groupMap.get(repo)!.push(r);
     } else {
       ungrouped.push(r);
     }
@@ -176,10 +176,10 @@ export function RunList({
         ) : (
           <div>
             {/* Named groups — each gets a subtle section header */}
-            {Array.from(groupMap.entries()).map(([branch, groupRuns]) => (
-              <div key={branch}>
+            {Array.from(groupMap.entries()).map(([repo, groupRuns]) => (
+              <div key={repo}>
                 <header className="border-b border-t border-blue-200/70 bg-blue-50/60 px-4 py-1 text-[10px] font-semibold uppercase tracking-wider text-blue-800">
-                  ⎇ {branch}
+                  {repo}
                 </header>
                 <ul className="divide-y divide-slate-200/60">
                   {groupRuns.map((r) => (
