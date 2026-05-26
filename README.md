@@ -1,79 +1,137 @@
 # agent-harness
 
-Local CLI harness for long-running Claude Agent SDK sessions, following the [Anthropic harness-design pattern](https://www.anthropic.com/engineering/harness-design-long-running-apps).
+> Local CLI + web UI for running long, multi-sprint Claude Agent SDK sessions through a **Planner → Executor → Evaluator** loop — based on the [Anthropic harness-design pattern](https://www.anthropic.com/engineering/harness-design-long-running-apps).
 
-Three roles, each a separate Claude session, communicating via files:
+Designed for work that's too big for a single Claude Code conversation: multi-file refactors, migrations, and feature work that needs to survive context resets. Each run produces one branch (and typically one PR); within a run, the planner splits work into sprints with rubrics and verification commands, and the loop iterates until every sprint passes.
 
-- **Planner** — reads your task, explores the target repo read-only, writes `plan.md` + per-sprint `contract.md` with rubrics + verification commands.
-- **Executor** — implements one sprint at a time in the target repo.
-- **Evaluator** — adversarial QA, runs verification commands, writes `verdict.md` (PASS / FAIL).
+```
+┌──────────┐    plan.md       ┌──────────┐    output.md    ┌───────────┐
+│ Planner  │ ───────────────▶ │ Executor │ ──────────────▶ │ Evaluator │ ──▶ PASS / FAIL
+└──────────┘   contract.md    └──────────┘                 └───────────┘
+                                                                 │
+                                                                 ▼
+                                                          next sprint, or done
+```
 
-State lives in `~/.agent-harness/runs/<run_id>/`. Files are the only shared state.
+All shared state lives on disk under `~/.agent-harness/runs/<run_id>/` — files are the only communication channel between roles. Each role runs as its own Claude session, so you can inspect, edit, or replay any step.
+
+---
+
+## Prerequisites
+
+- **Node.js ≥ 20.19**
+- **`ANTHROPIC_API_KEY`** — export in your shell, or save it from the in-app **Settings** panel after install (persists to `~/.agent-harness/config.json` with `0600` perms; env var wins when set)
+- **git** with worktree support (built in to modern git)
+- *Optional:* [`gt`](https://graphite.dev) if you want the stacked-PR submit workflow
+
+---
 
 ## Install
 
 ```bash
-cd ~/Developer/agent-harness
+git clone https://github.com/Alex-Finan/agent-harness.git
+cd agent-harness
 npm install
-npm run build
-ln -sf "$PWD/bin/harness" /usr/local/bin/harness    # optional
+npm run build           # compiles the CLI + MCP server
+npm run build:web       # builds the web UI bundle
 
-# build the web UI bundle (one-time, also rebuilds on each `harness serve` cycle if you re-run)
-npm run build:web
+# put `harness` on your PATH (optional but recommended)
+ln -sf "$PWD/bin/harness" /usr/local/bin/harness
 ```
 
-Set `ANTHROPIC_API_KEY` in your env — or save it from the in-app **Settings** panel
-(persists to `~/.agent-harness/config.json` with `0600` perms; the env var still
-wins when set, so existing shell setups keep working).
-
-## Desktop app
-
-A native Electron shell that wraps the server + UI in a real desktop window
-(no `harness serve` + browser dance — same model as Conductor):
+Verify:
 
 ```bash
-npm install                # one-time, root deps
-npm run desktop            # dev: builds + launches the Electron window
-npm run desktop:dist:mac   # produce a signed-ready .dmg in desktop/release/
+harness --help
 ```
 
-Under the hood, Electron spawns the harness Fastify server on an ephemeral
-loopback port and points a `BrowserWindow` at it. Native menus include
-**File → New Run** and **File → Open ~/.agent-harness**.
+---
 
-## Web UI
+## Quickstart — your first run
+
+The fastest way in is the web UI. It handles `init → plan → next → next → …` for you with one click.
 
 ```bash
-harness serve          # serves http://127.0.0.1:8787
-harness serve --port 9000 --host 0.0.0.0
+harness serve            # http://127.0.0.1:8787
 ```
 
-The UI streams live state from `~/.agent-harness/runs/`. From the browser you can:
+In the browser:
 
-- watch **multiple harnesses iterating simultaneously** — sidebar lists every run with status, current role, sprint, cost
-- **start new runs** from a form (target repo + task + optional `--base`/`--branch` for stacked workflows)
-- **auto-iterate** — kicks off planner → executor/evaluator loop and runs to completion or halt
-- **visualize the plan** as rendered markdown, edit it inline, and save (re-parses sprint headers, updates `total_sprints` when safe)
-- **see sprint progress** with PASS/FAIL badges and per-sprint contract/output/verdict tabs
-- watch the **live SDK transcript** stream (assistant text, tool calls, tool results, result message) via Server-Sent Events
-- see **cost** per role, per sprint, per session — with token-level breakdown (input/output/cache create/cache read), turns, duration
-- **edit the system prompts** for planner/executor/evaluator from the UI (writes `src/prompts/*.md`; takes effect on next role invocation)
-- **edit per-sprint contracts** inline (planner-written rubrics; useful when the planner over- or under-scopes a sprint)
-- **abort** runs from the UI
+1. Click **New Run**.
+2. Pick a target repo (any local git repo you want the harness to work on).
+3. Paste a task description — e.g. *"Add a `--dry-run` flag to the CLI that prints what would happen without writing files."*
+4. Click **Auto-iterate**. The planner writes `plan.md`, then the executor/evaluator loop runs sprint by sprint until everything passes (or halts on FAIL).
 
-Cost is parsed from the JSONL transcript files the SDK writes — no extra instrumentation.
+You'll see:
+
+- live SDK transcript streaming (assistant text, tool calls, results)
+- cost per role / sprint / token type
+- PASS / FAIL badges on each sprint
+- editable plan markdown + per-sprint contracts
+
+### Or do it from the CLI
+
+```bash
+# 1. create a run
+RUN=$(harness init --repo ~/Developer/my-project --task "Add a --dry-run flag to the CLI")
+
+# 2. plan
+harness plan --run "$RUN"
+
+# 3. iterate — `next` runs whichever role is up (executor or evaluator)
+harness next --run "$RUN"
+harness next --run "$RUN"
+# … repeat until `harness status --run "$RUN"` shows completed
+
+# 4. inspect
+harness logs --run "$RUN"
+```
+
+When the run completes, your changes are committed on the current branch of the target repo, ready to push.
+
+---
+
+## Use it from Claude Code (recommended)
+
+The harness ships an **MCP server** that exposes every operation (init, plan, next, list, status, edit plan/contract, abort, tail logs, …) as Claude Code tools. This is usually the nicest way to drive it — you describe the work in plain English and Claude calls the harness for you.
+
+Add to `~/.claude.json` under `mcpServers`:
+
+```json
+{
+  "mcpServers": {
+    "harness": {
+      "command": "/absolute/path/to/agent-harness/bin/harness",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Then in any Claude Code conversation:
+
+- *"Kick off a harness run on `~/Developer/my-project` to add a dark-mode toggle to the settings page."*
+- *"List my active harness runs and show the current sprint for each."*
+- *"Show me the verdict of sprint 2 on run `2026-05-20-143000-abc123`."*
+- *"Abort the stalled run and purge its worktree."*
+
+---
 
 ## Mental model: run vs sprint vs PR
 
 | | What it is | Maps to |
 |---|---|---|
-| **Sprint** | One executor → evaluator loop. Has a contract, a rubric, and verification commands. All sprints in a run land on **the same branch**. | A checkpoint inside one PR |
+| **Sprint** | One executor → evaluator cycle. Has a contract (scope + rubric + verification commands). All sprints in a run land on **the same branch**. | A checkpoint inside one PR |
 | **Run** | One `harness init`. One branch. Contains 1+ sprints. | One pull request |
 | **Stack** | Several runs whose branches are based on each other. | Several stacked PRs |
 
-A sprint is **never** its own PR. Sprints are the planner's way of breaking *one PR's worth of work* into checkpointable pieces. PR boundaries are your call — the planner explicitly flags when a task is too big for one PR and recommends a split.
+A sprint is **never** its own PR. Sprints are the planner's way of breaking *one PR's worth of work* into checkpointable pieces. The planner explicitly flags when a task is too big for one PR and suggests how to split it.
 
-## Quickstart — stacked PR workflow
+---
+
+## Stacked PRs (advanced)
+
+For larger features, chain runs together with `--base` so each PR branches off the previous one:
 
 ```bash
 ORIGIN=~/Developer/payabli-datalake
@@ -81,98 +139,104 @@ ORIGIN=~/Developer/payabli-datalake
 # PR #1 — bottom of the stack, branches off develop
 R1=$(harness init --repo "$ORIGIN" --base develop \
         --branch feat/payout-bronze --task-file sprint1.md)
-
 harness plan --run "$R1"
-harness next --run "$R1"     # executor
-harness next --run "$R1"     # evaluator
-# repeat until status == completed
+# … iterate to completion
 
-# Push and open PR #1
 cd ~/.agent-harness/worktrees/$R1
 gt submit --stack            # or: git push -u origin HEAD && gh pr create
 
-# PR #2 — stacked on PR #1's branch
+# PR #2 — stacked on PR #1
 R2=$(harness init --repo "$ORIGIN" --base feat/payout-bronze \
         --branch feat/payout-silver --task-file sprint2.md)
 
-# PR #3 — stacked on PR #2's branch
+# PR #3 — stacked on PR #2
 R3=$(harness init --repo "$ORIGIN" --base feat/payout-silver \
         --branch feat/payout-gold --task-file sprint3.md)
 ```
 
-When PR #1 merges into `develop`, run `gt sync` (or `git rebase`) from inside the run 2 worktree to restack the rest.
+When PR #1 merges into `develop`, run `gt sync` (or `git rebase`) from the next worktree to restack the rest.
 
-After a PR merges, close out the run and reclaim the worktree:
-
-```bash
-harness finish --run "$R1" --purge
-```
-
-## Legacy single-checkout mode
-
-`harness init` without `--base` writes directly into the target repo on whatever branch is checked out — same behavior as before this feature. Useful for quick experiments where you don't care about stacking.
+Clean up a finished run:
 
 ```bash
-harness init --repo ~/Developer/some-repo --task "fix the bug"
+harness finish --run "$R1" --purge      # marks completed, removes the worktree
 ```
 
-## Commands
+`harness init` **without** `--base` writes directly into the target repo on whatever branch is checked out — handy for quick experiments where you don't care about stacking.
+
+---
+
+## Desktop app (optional)
+
+A native Electron shell that wraps the server + UI in a real window — no `harness serve` + browser tab needed:
+
+```bash
+npm run desktop            # dev: builds + launches the Electron window
+npm run desktop:dist:mac   # produce a .dmg in desktop/release/
+```
+
+Native menus include **File → New Run** and **File → Open ~/.agent-harness**.
+
+---
+
+## CLI reference
 
 | Command | Purpose |
 |---|---|
 | `harness init --repo … --base <branch>` | Create a run in a new worktree branched off `<branch>` |
-| `harness init --repo …` *(no --base)* | Create a run that writes directly into the target repo |
-| `harness plan` | Invoke the planner |
-| `harness next` | Invoke whichever role is next (executor or evaluator) |
-| `harness status` | Print state.json |
-| `harness logs` | Tail SDK transcripts |
+| `harness init --repo …` *(no `--base`)* | Create a run that writes directly into the target repo |
+| `harness plan --run <id>` | Invoke the planner |
+| `harness next --run <id>` | Invoke whichever role is next (executor or evaluator) |
+| `harness status --run <id>` | Print `state.json` |
+| `harness logs --run <id>` | Tail SDK transcripts |
 | `harness list` | List all runs |
-| `harness retry` | Bump current role to re-run |
-| `harness finish [--purge]` | Mark a run completed; optionally remove the worktree |
-| `harness abort [--purge]` | Mark a run aborted; optionally remove the worktree |
-| `harness serve [--port N]` | Start the local web UI (live transcripts, costs, prompt + plan editing, multi-run dashboard) |
+| `harness retry --run <id>` | Bump current role to re-run |
+| `harness finish --run <id> [--purge]` | Mark completed; optionally remove the worktree |
+| `harness abort --run <id> [--purge]` | Mark aborted; optionally remove the worktree |
+| `harness serve [--port N] [--host H]` | Start the local web UI |
+| `harness mcp` | Run the MCP server (used by Claude Code, not directly by you) |
 
-See `docs/superpowers/specs/2026-05-19-agent-harness-design.md` for the full design.
+---
 
-## Layout under `~/.agent-harness/`
+## On-disk layout
 
 ```
-runs/<run_id>/
-├── task.md
-├── plan.md
-├── state.json           run metadata; includes worktree fields when --base was used
-├── sprints/01-<slug>/
-│   ├── contract.md      planner-written: scope + rubric + verification cmds
-│   ├── output.md        executor's summary
-│   └── verdict.md       evaluator's PASS|FAIL + reasoning
-└── logs/                per-role SDK transcripts (JSONL)
-
-worktrees/<run_id>/      git worktree, only present when run was created with --base
+~/.agent-harness/
+├── config.json                       optional, holds saved API key (0600)
+├── runs/<run_id>/
+│   ├── task.md                       the prompt you gave the planner
+│   ├── plan.md                       planner output: sprint list + rationale
+│   ├── state.json                    run metadata (status, current role/sprint, cost)
+│   ├── sprints/01-<slug>/
+│   │   ├── contract.md               planner-written: scope + rubric + verification cmds
+│   │   ├── output.md                 executor's summary
+│   │   └── verdict.md                evaluator's PASS|FAIL + reasoning
+│   └── logs/                         per-role SDK transcripts (JSONL)
+└── worktrees/<run_id>/               git worktree (only when run was created with --base)
 ```
 
-## Use from Claude Code
+Everything is plain text or JSON — `cat`, `grep`, and your editor work fine for inspecting or hand-editing any of it.
 
-The harness ships an MCP server that exposes all harness operations as Claude Code tools. Once wired up, you can drive the entire planner → executor → evaluator loop from a Claude Code conversation — listing runs, inspecting state, kicking off new runs, editing plans and contracts, and tailing logs — without shell-outs or HTTP calls.
+---
 
-Add the following to `~/.claude.json` (under `mcpServers`):
+## Web UI features at a glance
 
-```json
-{
-  "mcpServers": {
-    "harness": {
-      "command": "/Users/<user>/Developer/agent-harness/bin/harness",
-      "args": ["mcp"]
-    }
-  }
-}
-```
+- **Multi-run sidebar** — every run with status, current role, sprint, cost
+- **Auto-iterate** — planner → executor → evaluator loop runs to completion or halt
+- **Plan editor** — rendered markdown, edit + save inline; re-parses sprint headers
+- **Per-sprint tabs** — contract / output / verdict, with PASS/FAIL badges
+- **Live SDK transcript** via SSE — assistant text, tool calls, results, final message
+- **Cost panel** — per role, per sprint, per session; token breakdown (input/output/cache create/cache read), turns, duration. Parsed from the JSONL transcripts the SDK already writes — no extra instrumentation.
+- **Prompt editor** — edit `src/prompts/{planner,executor,evaluator}.md` from the UI; takes effect on next role invocation
+- **Contract editor** — tweak the planner's rubric per sprint when it over- or under-scopes
+- **Abort** from the UI
 
-Replace `/Users/<user>/Developer/agent-harness` with the absolute path to your local clone.
+---
 
-### Example Claude Code prompts
+## Design doc
 
-- "List my active harness runs and show the current sprint status for each."
-- "Kick off a harness run on ~/Developer/my-project to add a dark mode toggle to the settings page."
-- "Show me the verdict of sprint 2 on run 2026-05-20-143000-abc123 — did it pass or fail?"
-- "Save this revised plan to run 2026-05-20-143000-abc123 and update the sprint count."
-- "Abort the stalled run 2026-05-19-090000-deadbeef and purge its worktree."
+Full architecture & rationale: [`docs/superpowers/specs/2026-05-19-agent-harness-design.md`](docs/superpowers/specs/2026-05-19-agent-harness-design.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE) if present, otherwise treat as MIT.
