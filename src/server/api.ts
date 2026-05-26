@@ -4,7 +4,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { handleList } from '../cli/commands/list.js';
 import { loadRun, saveState } from '../state/run.js';
-import { runDir, planPath, overviewPath, sprintsDir, harnessHome } from '../state/paths.js';
+import { runDir, planPath, overviewPath, sprintsDir, harnessHome, trialsDir } from '../state/paths.js';
 import { writeAtomic, readOrNull } from '../lib/fs.js';
 import { VERSION } from '../index.js';
 import { parseSprintsFromPlan } from '../state/artifacts.js';
@@ -538,6 +538,52 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
   app.get('/api/runs/:id/cost', async (req) => {
     const { id } = req.params as { id: string };
     return computeRunCost(id);
+  });
+
+  // -------------------- Auto-research trials --------------------
+
+  app.get('/api/runs/:id/trials', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const dir = trialsDir(id);
+    try {
+      const entries = await fs.readdir(dir);
+      const results: unknown[] = [];
+      for (const entry of entries.sort()) {
+        const resultFile = path.join(dir, entry, 'result.json');
+        try {
+          const raw = await fs.readFile(resultFile, 'utf8');
+          results.push(JSON.parse(raw));
+        } catch {
+          // trial dir exists but no result yet — skip
+        }
+      }
+      return { trials: results };
+    } catch {
+      // trials directory doesn't exist yet — return empty
+      return { trials: [] };
+    }
+  });
+
+  app.get('/api/runs/:id/notes', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      const run = await loadRun(id);
+      const experimentDir = run.state.experiment_dir;
+      if (!experimentDir) {
+        reply.code(404);
+        return { error: 'no experiment_dir configured for this run' };
+      }
+      const notesPath = path.join(experimentDir, 'notes.md');
+      try {
+        const content = await fs.readFile(notesPath, 'utf8');
+        return { content };
+      } catch {
+        return { content: '' };
+      }
+    } catch (err) {
+      reply.code(404);
+      return { error: (err as Error).message };
+    }
   });
 
   // -------------------- Prompts (global) --------------------

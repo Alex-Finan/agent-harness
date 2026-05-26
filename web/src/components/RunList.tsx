@@ -44,12 +44,19 @@ function RunRow({
   });
   const isLive = chip === 'running';
 
-  // Human-readable label for the row's secondary text. Live runs show
-  // "Sprint N · execution" / "Sprint N · evaluation" so an operator can see
-  // sprint progress and phase without opening the run. Planner/done collapse
-  // to a single word — there is no sprint number to attach.
+  // Human-readable label for the row's secondary text. Auto-research runs
+  // show trial progress + best metric. Standard runs show sprint progress.
   let roleLabel: string;
-  if (chip === 'halted') roleLabel = 'failed';
+  if (r.run_type === 'auto_research') {
+    const trials = r.trials_completed ?? 0;
+    const max = r.max_trials ?? '?';
+    const best =
+      r.best_metric !== undefined && r.best_metric !== null
+        ? `M=${r.best_metric.toFixed(4)}`
+        : null;
+    roleLabel = best ? `${trials} trials · ${best}` : `${trials} trials`;
+    if (isLive) roleLabel += '…';
+  } else if (chip === 'halted') roleLabel = 'failed';
   else if (chip === 'completed') roleLabel = 'done';
   else if (chip === 'aborted') roleLabel = 'aborted';
   else if (r.next_role === 'planner') roleLabel = isLive ? 'planning…' : 'planning';

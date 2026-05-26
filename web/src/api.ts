@@ -20,6 +20,22 @@ export interface RunState {
   cost_total_usd?: number;
   dispatching?: 'planner' | 'next' | null;
   sprint_pips?: SprintPip[];
+  // Auto-research fields
+  run_type?: 'standard' | 'auto_research';
+  experiment_dir?: string;
+  objective?: string;
+  evaluation_cmd?: string;
+  max_trials?: number;
+  budget_minutes_per_trial?: number;
+  trials_completed?: number;
+  best_metric?: number;
+}
+
+export interface TrialResult {
+  trial: number;
+  metric: number | null;
+  status: 'improved' | 'regressed' | 'no_metric';
+  duration_ms: number;
 }
 
 export interface SprintPip {
@@ -156,7 +172,19 @@ export const api = {
 
   getRun: (id: string) => http<RunDetail>(`/api/runs/${id}`),
 
-  createRun: (body: { repo: string; task: string; maxRetries?: number; base?: string; branch?: string }) =>
+  createRun: (body: {
+    repo: string;
+    task: string;
+    maxRetries?: number;
+    base?: string;
+    branch?: string;
+    runType?: 'standard' | 'auto_research';
+    experimentDir?: string;
+    objective?: string;
+    evaluationCmd?: string;
+    maxTrials?: number;
+    budgetMinutesPerTrial?: number;
+  }) =>
     http<{ runId: string; worktreePath?: string; branch?: string }>('/api/runs', {
       method: 'POST',
       body: JSON.stringify(body)
@@ -170,6 +198,15 @@ export const api = {
 
   startAuto: (id: string) =>
     http<{ runId: string; role: string; startedAt: string }>(`/api/runs/${id}/auto`, { method: 'POST' }),
+
+  startAutoResearch: (id: string) =>
+    http<{ runId: string; role: string; startedAt: string }>(`/api/runs/${id}/auto-research`, { method: 'POST' }),
+
+  getTrialResults: (runId: string) =>
+    http<{ trials: TrialResult[] }>(`/api/runs/${runId}/trials`).then((r) => r.trials),
+
+  getNotes: (runId: string) =>
+    http<{ content: string }>(`/api/runs/${runId}/notes`).then((r) => r.content),
 
   abort: (id: string) => http<{ ok: boolean }>(`/api/runs/${id}/abort`, { method: 'POST' }),
 

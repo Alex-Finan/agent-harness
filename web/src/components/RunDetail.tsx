@@ -23,6 +23,7 @@ import { FailureBanner } from './FailureBanner';
 import { RevisePlanPanel } from './RevisePlanPanel';
 import { InteractivePlanView } from './InteractivePlanView';
 import { formatCost, formatRelative, formatTaskTitle } from '../lib/format';
+import { AutoResearchView } from './AutoResearchView';
 
 /**
  * A run is in the "planning phase" until the planner writes the first contract.md.
@@ -247,6 +248,54 @@ export function RunDetail({
     : canNext
       ? { label: 'next', onClick: startNext, disabled: busy }
       : null;
+
+  // Auto-research runs get their own dedicated view — no sprint panels.
+  if (s.run_type === 'auto_research') {
+    return (
+      <div className="flex h-full flex-col overflow-hidden">
+        <header className="border-b border-slate-200 bg-gradient-to-r from-blue-50/60 to-transparent px-6 py-4" title={`run_id ${s.run_id}`}>
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <RunStatusChip state={chipState} detail="auto-research" />
+                <span className="text-xs text-slate-500">updated {formatRelative(s.updated_at)}</span>
+              </div>
+              <h1 className="mt-2.5 truncate text-xl font-semibold text-blue-950" title={s.task_summary}>
+                {formatTaskTitle(s.task_summary)}
+              </h1>
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                <span className="truncate font-mono" title={s.target_repo}>
+                  {s.target_repo}
+                </span>
+                {detail.cost.totalUsd > 0 ? (
+                  <span className="font-mono text-emerald-600/80" title={`${detail.cost.entries.length} session${detail.cost.entries.length === 1 ? '' : 's'}`}>
+                    {formatCost(detail.cost.totalUsd)}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-col items-end gap-2">
+              <div className="flex gap-2">
+                {s.status === 'in_progress' ? (
+                  <button
+                    className="btn btn-danger"
+                    onClick={abort}
+                    disabled={busy}
+                  >
+                    abort
+                  </button>
+                ) : null}
+              </div>
+              {error ? <span className="text-xs text-rose-500">{error}</span> : null}
+            </div>
+          </div>
+        </header>
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <AutoResearchView run={s} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
