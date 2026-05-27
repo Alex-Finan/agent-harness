@@ -565,6 +565,17 @@ function ChatComposer({
   disabled: boolean;
   error: string | null;
 }) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Grow the composer with its content, between MIN_PX and MAX_PX. Past the
+  // cap the textarea scrolls internally instead of pushing the transcript.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const MIN_PX = 64;
+    const MAX_PX = 240;
+    el.style.height = 'auto';
+    el.style.height = Math.max(MIN_PX, Math.min(el.scrollHeight, MAX_PX)) + 'px';
+  }, [draft]);
   return (
     <div className="border-t border-slate-200 bg-white p-2">
       {error ? (
@@ -575,7 +586,9 @@ function ChatComposer({
       <div className="mx-auto flex max-w-3xl flex-col gap-1">
         <div className="relative rounded-lg border border-slate-300 bg-white shadow-sm transition focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-200">
           <textarea
-            className="block h-16 w-full resize-none rounded-lg border-0 bg-transparent px-3 py-2 pr-20 text-[13px] leading-snug placeholder:text-slate-400 focus:outline-none focus:ring-0"
+            ref={textareaRef}
+            className="block w-full resize-none overflow-y-auto rounded-lg border-0 bg-transparent px-3 py-2 pr-20 text-[13px] leading-snug placeholder:text-slate-400 focus:outline-none focus:ring-0"
+            style={{ height: 64 }}
             placeholder={disabled ? 'Chat has ended.' : 'Message Claude…'}
             value={draft}
             disabled={disabled}
