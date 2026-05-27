@@ -530,6 +530,8 @@ export const chatApi = {
     http<{ ok: boolean; state: ChatState }>(`/api/chat/${id}/clear`, { method: 'POST' }),
   compact: (id: string) =>
     http<{ ok: boolean; summary: string }>(`/api/chat/${id}/compact`, { method: 'POST' }),
+  fork: (id: string) =>
+    http<{ ok: boolean; chat: ChatState }>(`/api/chat/${id}/fork`, { method: 'POST' }),
 
   getNotes: (id: string) => http<{ notesMd: string }>(`/api/chat/${id}/notes`),
   saveNotes: (id: string, notesMd: string) =>

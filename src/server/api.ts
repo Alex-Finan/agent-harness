@@ -776,6 +776,17 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
     }
   });
 
+  app.post('/api/chat/:id/fork', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      const state = await chat.forkChat(id);
+      return { ok: true, chat: state };
+    } catch (e) {
+      reply.code(400);
+      return { error: (e as Error).message };
+    }
+  });
+
   app.delete('/api/chat/:id', async (req) => {
     const { id } = req.params as { id: string };
     await chat.deleteChat(id);

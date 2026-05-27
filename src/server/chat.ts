@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
+import * as os from 'node:os';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { ensureDir, writeAtomic, readOrNull } from '../lib/fs.js';
@@ -18,6 +19,11 @@ import {
   readChatState,
   writeChatState
 } from '../state/chatState.js';
+import {
+  readChatComments,
+  writeChatComments,
+  newChatCommentId
+} from '../state/chatComments.js';
 import type { EventBus } from './events.js';
 
 /**
@@ -380,6 +386,100 @@ export class ChatManager {
     const seed = `Prior conversation summary (compacted by /compact):\n\n${summary}`;
     await this.clearChat(chatId, seed);
     return { summary };
+  }
+
+  /**
+   * Branch a chat: create a sibling that resumes from the parent's exact
+   * conversation state but evolves independently. Useful for "what if I had
+   * asked X instead?" without losing the original thread.
+   *
+   * Mechanics: the claude CLI stores each session's transcript at
+   * `~/.claude/projects/<encoded-cwd>/<session_id>.jsonl`. We copy that file
+   * under a fresh session UUID (rewriting the `sessionId` field on every
+   * line), then mint a new harness chat record pointing at it with the same
+   * `turn_count` as the parent — that flips the next spawn down the
+   * `--resume` path so Claude picks up the prior context. The harness-side
+   * transcript, notes, and comments are copied too so the UI matches.
+   *
+   * The parent chat is untouched. Refuses to fork while the parent has a
+   * turn in flight (the CLI session file could be mid-write).
+   */
+  async forkChat(parentId: string): Promise<ChatState> {
+    const parent = await readChatState(parentId);
+    if (!parent) throw new Error('chat not found');
+
+    const running = this.sessions.get(parentId);
+    if (running?.awaitingResult || parent.status === 'thinking') {
+      throw new Error('cannot fork while a turn is in flight; wait for the assistant to finish');
+    }
+
+    const new_chat_id = newChatId();
+    const new_session_id = randomUUID();
+    const now = new Date().toISOString();
+
+    // Copy the claude CLI's per-session jsonl. cwd `/Users/foo` →
+    // `-Users-foo` is the CLI's own encoding. If the parent never ran a
+    // turn there's no file to copy — the fork starts empty.
+    if (parent.turn_count > 0) {
+      const encoded = parent.cwd.replace(/\//g, '-');
+      const cliRoot = path.join(os.homedir(), '.claude', 'projects', encoded);
+      const src = path.join(cliRoot, `${parent.session_id}.jsonl`);
+      const dst = path.join(cliRoot, `${new_session_id}.jsonl`);
+      const raw = await readOrNull(src);
+      if (raw) {
+        const out: string[] = [];
+        for (const line of raw.split('\n')) {
+          if (!line) continue;
+          try {
+            const obj = JSON.parse(line) as Record<string, unknown>;
+            if (typeof obj.sessionId === 'string') {
+              obj.sessionId = new_session_id;
+            }
+            out.push(JSON.stringify(obj));
+          } catch {
+            // Preserve unparseable lines verbatim — the CLI may use them.
+            out.push(line);
+          }
+        }
+        await ensureDir(cliRoot);
+        await fs.writeFile(dst, out.join('\n') + '\n', 'utf8');
+      }
+    }
+
+    // Set up the new harness chat directory with copies of the parent's
+    // operator-visible state.
+    await ensureDir(chatDir(new_chat_id));
+    const transcript = (await readOrNull(chatTranscriptPath(parentId))) ?? '';
+    await writeAtomic(chatTranscriptPath(new_chat_id), transcript);
+    const notes = (await readOrNull(chatNotesPath(parentId))) ?? '';
+    await writeAtomic(chatNotesPath(new_chat_id), notes);
+    const parentComments = await readChatComments(parentId);
+    if (parentComments.length > 0) {
+      // Fresh comment ids so future edits/deletes on the fork don't shadow
+      // the parent's annotations (or vice versa).
+      const cloned = parentComments.map((c) => ({ ...c, id: newChatCommentId() }));
+      await writeChatComments(new_chat_id, cloned);
+    }
+
+    const state: ChatState = {
+      chat_id: new_chat_id,
+      title: `${parent.title} (fork)`.slice(0, 200),
+      cwd: parent.cwd,
+      session_id: new_session_id,
+      model: parent.model,
+      permission_mode: parent.permission_mode,
+      status: 'idle',
+      created_at: now,
+      updated_at: now,
+      cost_usd: 0,
+      // Carry the parent's turn count so ensureRunning() takes the
+      // --resume branch on first spawn instead of --session-id (which would
+      // try to create a session that already exists on disk).
+      turn_count: parent.turn_count
+    };
+    await writeChatState(state);
+    this.bus.publish({ type: 'chat_created', chatId: new_chat_id, state });
+    return state;
   }
 
   async stopChat(chatId: string): Promise<void> {

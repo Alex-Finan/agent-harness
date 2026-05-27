@@ -258,7 +258,12 @@ export function App() {
               <PromptsPanel />
             </PageShell>
           ) : selectedChat ? (
-            <ChatSession key={selectedChat} chatId={selectedChat} onBack={() => selectChat(null)} />
+            <ChatSession
+              key={selectedChat}
+              chatId={selectedChat}
+              onBack={() => selectChat(null)}
+              onSwitchTo={(id) => selectChat(id)}
+            />
           ) : selected ? (
             <RunDetail key={selected} runId={selected} onSelectRun={selectRun} allRuns={runs} />
           ) : (

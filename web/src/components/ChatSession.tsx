@@ -26,7 +26,17 @@ import { rangeLabel, truncate } from '../lib/commentAnchor';
  * Streams the assistant's tokens incrementally via SSE `chat_stream` deltas,
  * then settles to the full `chat_message` once the message_stop fires.
  */
-export function ChatSession({ chatId, onBack }: { chatId: string; onBack: () => void }) {
+export function ChatSession({
+  chatId,
+  onBack,
+  onSwitchTo
+}: {
+  chatId: string;
+  onBack: () => void;
+  /** Optional: navigate to a different chat (e.g. a freshly-forked sibling).
+   *  Defaults to onBack so the user lands on the chat list. */
+  onSwitchTo?: (newChatId: string) => void;
+}) {
   const [detail, setDetail] = useState<ChatDetail | null>(null);
   const [pendingStream, setPendingStream] = useState<Record<string, StreamingMessage>>({});
   const [draft, setDraft] = useState('');
@@ -200,6 +210,27 @@ export function ChatSession({ chatId, onBack }: { chatId: string; onBack: () => 
     }
   }
 
+  const [forkBusy, setForkBusy] = useState(false);
+  async function fork() {
+    if (!detail || forkBusy) return;
+    if (
+      !confirm(
+        'Fork this chat? A sibling chat is created with the same context window. Both can be continued independently.'
+      )
+    )
+      return;
+    setForkBusy(true);
+    try {
+      const { chat } = await chatApi.fork(chatId);
+      if (onSwitchTo) onSwitchTo(chat.chat_id);
+      else onBack();
+    } catch (e) {
+      alert(`Fork failed: ${(e as Error).message}`);
+    } finally {
+      setForkBusy(false);
+    }
+  }
+
   if (!detail) {
     return <div className="p-6 text-sm text-slate-500">Loading chat…</div>;
   }
@@ -242,6 +273,18 @@ export function ChatSession({ chatId, onBack }: { chatId: string; onBack: () => 
               title="/compact — summarize then restart fresh with the summary"
             >
               {compactBusy ? 'Compacting…' : 'Compact'}
+            </button>
+            <button
+              className="rounded border border-slate-200 px-1.5 py-0.5 hover:border-violet-400 hover:text-violet-700 disabled:opacity-50"
+              onClick={fork}
+              disabled={
+                detail.state.status === 'thinking' ||
+                forkBusy ||
+                detail.transcript.length === 0
+              }
+              title="Fork — clone this chat's context into a new sibling you can continue independently"
+            >
+              {forkBusy ? 'Forking…' : 'Fork'}
             </button>
             <button
               className="rounded border border-slate-200 px-1.5 py-0.5 hover:border-slate-400 hover:text-slate-700"
