@@ -458,11 +458,13 @@ export class ChatManager {
     const new_session_id = randomUUID();
     const now = new Date().toISOString();
 
-    // Copy the claude CLI's per-session jsonl. cwd `/Users/foo` →
-    // `-Users-foo` is the CLI's own encoding. If the parent never ran a
-    // turn there's no file to copy — the fork starts empty.
+    // Copy the claude CLI's per-session jsonl. The CLI encodes cwd by
+    // replacing every non-alphanumeric character with `-`, so
+    // `/Users/foo/bar_baz` → `-Users-foo-bar-baz` and `/x/.claude` →
+    // `-x--claude`. If the parent never ran a turn there's no file to
+    // copy — the fork starts empty.
     if (parent.turn_count > 0) {
-      const encoded = parent.cwd.replace(/\//g, '-');
+      const encoded = parent.cwd.replace(/[^a-zA-Z0-9-]/g, '-');
       const cliRoot = path.join(os.homedir(), '.claude', 'projects', encoded);
       const src = path.join(cliRoot, `${parent.session_id}.jsonl`);
       const dst = path.join(cliRoot, `${new_session_id}.jsonl`);
