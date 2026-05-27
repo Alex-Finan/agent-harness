@@ -11,6 +11,7 @@ import {
 import { ChatMessage } from './ChatMessage';
 import { Markdown } from './Markdown';
 import { JsxArtifactView } from './JsxArtifactView';
+import { ForkDialog } from './ForkDialog';
 import { rangeLabel, truncate } from '../lib/commentAnchor';
 
 /**
@@ -214,26 +215,7 @@ export function ChatSession({
     }
   }
 
-  const [forkBusy, setForkBusy] = useState(false);
-  async function fork() {
-    if (!detail || forkBusy) return;
-    if (
-      !confirm(
-        'Fork this chat? A sibling chat is created with the same context window. Both can be continued independently.'
-      )
-    )
-      return;
-    setForkBusy(true);
-    try {
-      const { chat } = await chatApi.fork(chatId);
-      if (onSwitchTo) onSwitchTo(chat.chat_id);
-      else onBack();
-    } catch (e) {
-      alert(`Fork failed: ${(e as Error).message}`);
-    } finally {
-      setForkBusy(false);
-    }
-  }
+  const [forkDialogOpen, setForkDialogOpen] = useState(false);
 
   if (!detail) {
     return <div className="p-6 text-sm text-slate-500">Loading chat…</div>;
@@ -280,15 +262,11 @@ export function ChatSession({
             </button>
             <button
               className="rounded border border-slate-200 px-1.5 py-0.5 hover:border-violet-400 hover:text-violet-700 disabled:opacity-50"
-              onClick={fork}
-              disabled={
-                detail.state.status === 'thinking' ||
-                forkBusy ||
-                detail.transcript.length === 0
-              }
+              onClick={() => setForkDialogOpen(true)}
+              disabled={detail.state.status === 'thinking' || detail.transcript.length === 0}
               title="Fork — clone this chat's context into a new sibling you can continue independently"
             >
-              {forkBusy ? 'Forking…' : 'Fork'}
+              Fork…
             </button>
             <button
               className="rounded border border-slate-200 px-1.5 py-0.5 hover:border-slate-400 hover:text-slate-700"
@@ -377,6 +355,20 @@ export function ChatSession({
         focused={focusedComment}
         onFocus={setFocusedComment}
       />
+
+      {forkDialogOpen ? (
+        <ForkDialog
+          chatId={chatId}
+          parentTitle={detail.state.title}
+          parentCwd={detail.state.cwd}
+          onClose={() => setForkDialogOpen(false)}
+          onCreated={(newChatId) => {
+            setForkDialogOpen(false);
+            if (onSwitchTo) onSwitchTo(newChatId);
+            else onBack();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

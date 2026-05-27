@@ -2,9 +2,13 @@ import * as fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { ensureDir, writeAtomic, readOrNull } from '../lib/fs.js';
+import { createWorktree, removeWorktree } from '../lib/worktree.js';
+
+const runCmd = promisify(execFile);
 import {
   chatDir,
   chatTranscriptPath,
@@ -91,6 +95,25 @@ function resolveClaudeCli(): string {
   }
   // Fall back to PATH lookup at spawn time.
   return 'claude';
+}
+
+/** Resolve the currently-checked-out branch of `repo`. Throws with a clean
+ *  message if the directory isn't a git repo (so the fork dialog can surface
+ *  it instead of a generic execFile error). */
+async function currentGitBranch(repo: string): Promise<string> {
+  try {
+    const { stdout } = await runCmd('git', ['-C', repo, 'rev-parse', '--abbrev-ref', 'HEAD']);
+    const name = stdout.trim();
+    if (!name || name === 'HEAD') {
+      throw new Error(
+        `${repo} is in a detached HEAD state; pass --base or check out a branch first`
+      );
+    }
+    return name;
+  } catch (e) {
+    const msg = (e as { stderr?: string; message?: string }).stderr ?? (e as Error).message;
+    throw new Error(`Cannot create worktree: ${repo} is not a git repository (${msg.trim()})`);
+  }
 }
 
 export class ChatManager {
@@ -269,6 +292,9 @@ export class ChatManager {
     // text. Snapshot their ids so we only clear what was actually sent
     // (comments added during the assistant's response stay queued).
     const pendingComments = await readChatComments(chatId);
+    if (!text && pendingComments.length === 0) {
+      throw new Error('nothing to send: composer is empty and no comments are queued');
+    }
     const sentCommentIds = new Set(pendingComments.map((c) => c.id));
     let textWithComments = text;
     if (pendingComments.length > 0) {
@@ -442,10 +468,21 @@ export class ChatManager {
    * `--resume` path so Claude picks up the prior context. The harness-side
    * transcript, notes, and comments are copied too so the UI matches.
    *
+   * When `opts.worktree` is provided, a fresh `git worktree` is created off
+   * the parent's repo on a new branch — the fork runs in that isolated
+   * checkout so divergent file edits don't trample the parent's working
+   * tree. The worktree is torn down when the fork is deleted.
+   *
    * The parent chat is untouched. Refuses to fork while the parent has a
    * turn in flight (the CLI session file could be mid-write).
    */
-  async forkChat(parentId: string): Promise<ChatState> {
+  async forkChat(
+    parentId: string,
+    opts: {
+      title?: string;
+      worktree?: { baseBranch?: string; newBranch?: string };
+    } = {}
+  ): Promise<ChatState> {
     const parent = await readChatState(parentId);
     if (!parent) throw new Error('chat not found');
 
@@ -458,16 +495,39 @@ export class ChatManager {
     const new_session_id = randomUUID();
     const now = new Date().toISOString();
 
-    // Copy the claude CLI's per-session jsonl. The CLI encodes cwd by
-    // replacing every non-alphanumeric character with `-`, so
-    // `/Users/foo/bar_baz` → `-Users-foo-bar-baz` and `/x/.claude` →
-    // `-x--claude`. If the parent never ran a turn there's no file to
-    // copy — the fork starts empty.
+    // Decide effective cwd: a fresh worktree if requested, else the parent's
+    // cwd. The worktree dir is created under ~/.agent-harness/worktrees/<id>
+    // (createWorktree default). We capture origin + branch on state so
+    // deleteChat can `git worktree remove` cleanly.
+    let effectiveCwd = parent.cwd;
+    let worktreeMeta: { origin: string; branch: string } | undefined;
+    if (opts.worktree) {
+      const baseBranch =
+        opts.worktree.baseBranch?.trim() || (await currentGitBranch(parent.cwd));
+      const newBranch =
+        opts.worktree.newBranch?.trim() ||
+        `agent-harness/fork-${new_chat_id.replace(/^chat-/, '')}`;
+      const wt = await createWorktree({
+        originRepo: parent.cwd,
+        runId: new_chat_id,
+        baseBranch,
+        newBranch
+      });
+      effectiveCwd = wt.path;
+      worktreeMeta = { origin: parent.cwd, branch: newBranch };
+    }
+
+    // Copy the claude CLI's per-session jsonl into the directory matching
+    // the *effective* cwd's encoding. The CLI encodes cwd by replacing
+    // every non-alphanumeric character with `-`, so
+    // `/Users/foo/bar_baz` → `-Users-foo-bar-baz`.
     if (parent.turn_count > 0) {
-      const encoded = parent.cwd.replace(/[^a-zA-Z0-9-]/g, '-');
-      const cliRoot = path.join(os.homedir(), '.claude', 'projects', encoded);
-      const src = path.join(cliRoot, `${parent.session_id}.jsonl`);
-      const dst = path.join(cliRoot, `${new_session_id}.jsonl`);
+      const srcEncoded = parent.cwd.replace(/[^a-zA-Z0-9-]/g, '-');
+      const dstEncoded = effectiveCwd.replace(/[^a-zA-Z0-9-]/g, '-');
+      const srcDir = path.join(os.homedir(), '.claude', 'projects', srcEncoded);
+      const dstDir = path.join(os.homedir(), '.claude', 'projects', dstEncoded);
+      const src = path.join(srcDir, `${parent.session_id}.jsonl`);
+      const dst = path.join(dstDir, `${new_session_id}.jsonl`);
       const raw = await readOrNull(src);
       if (raw) {
         const out: string[] = [];
@@ -478,13 +538,18 @@ export class ChatManager {
             if (typeof obj.sessionId === 'string') {
               obj.sessionId = new_session_id;
             }
+            // When the fork runs in a worktree, the CLI process cwd
+            // differs from the parent's. Rewrite the per-entry cwd so
+            // history reads as if it happened in the new tree.
+            if (worktreeMeta && typeof obj.cwd === 'string' && obj.cwd === parent.cwd) {
+              obj.cwd = effectiveCwd;
+            }
             out.push(JSON.stringify(obj));
           } catch {
-            // Preserve unparseable lines verbatim — the CLI may use them.
             out.push(line);
           }
         }
-        await ensureDir(cliRoot);
+        await ensureDir(dstDir);
         await fs.writeFile(dst, out.join('\n') + '\n', 'utf8');
       }
     }
@@ -504,10 +569,11 @@ export class ChatManager {
       await writeChatComments(new_chat_id, cloned);
     }
 
+    const baseTitle = opts.title?.trim() || `${parent.title} (fork)`;
     const state: ChatState = {
       chat_id: new_chat_id,
-      title: `${parent.title} (fork)`.slice(0, 200),
-      cwd: parent.cwd,
+      title: baseTitle.slice(0, 200),
+      cwd: effectiveCwd,
       session_id: new_session_id,
       model: parent.model,
       permission_mode: parent.permission_mode,
@@ -518,7 +584,10 @@ export class ChatManager {
       // Carry the parent's turn count so ensureRunning() takes the
       // --resume branch on first spawn instead of --session-id (which would
       // try to create a session that already exists on disk).
-      turn_count: parent.turn_count
+      turn_count: parent.turn_count,
+      ...(worktreeMeta
+        ? { worktree_origin: worktreeMeta.origin, worktree_branch: worktreeMeta.branch }
+        : {})
     };
     await writeChatState(state);
     this.bus.publish({ type: 'chat_created', chatId: new_chat_id, state });
@@ -545,8 +614,11 @@ export class ChatManager {
     }
   }
 
-  /** Delete a chat session and all its on-disk state. Kills the subprocess. */
+  /** Delete a chat session and all its on-disk state. Kills the subprocess,
+   *  and if this chat owned a git worktree (set up by forkChat with the
+   *  --worktree option) tears it down and deletes its branch. */
   async deleteChat(chatId: string): Promise<void> {
+    const state = await readChatState(chatId);
     const session = this.sessions.get(chatId);
     if (session) {
       try {
@@ -555,6 +627,14 @@ export class ChatManager {
         /* ignore */
       }
       this.sessions.delete(chatId);
+    }
+    if (state?.worktree_origin && state.cwd) {
+      // Best-effort cleanup — a failure here shouldn't block the chat from
+      // being removed (the operator can `git worktree prune` later if
+      // something went sideways).
+      await removeWorktree(state.worktree_origin, state.cwd, state.worktree_branch).catch(() => {
+        /* ignore */
+      });
     }
     await fs.rm(chatDir(chatId), { recursive: true, force: true });
     this.bus.publish({ type: 'chat_deleted', chatId });

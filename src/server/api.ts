@@ -50,11 +50,24 @@ const ChatCreateBody = z.object({
 });
 
 const ChatSendBody = z.object({
-  text: z.string().min(1)
+  // Empty is fine when at least one side-panel comment is queued — those
+  // get folded in by the chat manager. The manager rejects the truly-empty
+  // case (no text + no comments) so this layer doesn't need a min(1).
+  text: z.string()
 });
 
 const ChatNotesBody = z.object({
   notesMd: z.string()
+});
+
+const ChatForkBody = z.object({
+  title: z.string().optional(),
+  worktree: z
+    .object({
+      baseBranch: z.string().optional(),
+      newBranch: z.string().optional()
+    })
+    .optional()
 });
 
 const ChatCommentAnchor = z.object({
@@ -778,8 +791,13 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
 
   app.post('/api/chat/:id/fork', async (req, reply) => {
     const { id } = req.params as { id: string };
+    const parsed = ChatForkBody.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: parsed.error.message };
+    }
     try {
-      const state = await chat.forkChat(id);
+      const state = await chat.forkChat(id, parsed.data);
       return { ok: true, chat: state };
     } catch (e) {
       reply.code(400);

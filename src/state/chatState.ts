@@ -37,7 +37,13 @@ export const ChatStateSchema = z.object({
   // Seed text prepended to the next user turn (used after /compact to carry
   // a summary of the prior conversation into the fresh session). Cleared
   // after one use.
-  pending_seed: z.string().optional()
+  pending_seed: z.string().optional(),
+  // When this chat was forked with --worktree, the original repo where
+  // `git worktree add` ran (so we can find the right repo to run
+  // `git worktree remove` against on cleanup) and the branch name that was
+  // created. Absent on regular chats and same-cwd forks.
+  worktree_origin: z.string().optional(),
+  worktree_branch: z.string().optional()
 });
 
 export type ChatState = z.infer<typeof ChatStateSchema>;
