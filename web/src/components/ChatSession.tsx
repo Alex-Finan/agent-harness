@@ -147,13 +147,17 @@ export function ChatSession({ chatId, onBack }: { chatId: string; onBack: () => 
   async function send() {
     const text = draft.trim();
     if (!text || !detail) return;
+    // Clear the composer immediately so the operator can keep typing/queuing
+    // the next message instead of waiting for the round-trip to finish.
+    setDraft('');
     setSending(true);
     setSendError(null);
     try {
       await chatApi.send(chatId, text);
-      setDraft('');
     } catch (e) {
       setSendError((e as Error).message);
+      // Restore the draft so the operator doesn't lose what they typed.
+      setDraft((d) => (d ? d : text));
     } finally {
       setSending(false);
     }
@@ -574,7 +578,7 @@ function ChatComposer({
             className="block h-16 w-full resize-none rounded-lg border-0 bg-transparent px-3 py-2 pr-20 text-[13px] leading-snug placeholder:text-slate-400 focus:outline-none focus:ring-0"
             placeholder={disabled ? 'Chat has ended.' : 'Message Claude…'}
             value={draft}
-            disabled={disabled || sending}
+            disabled={disabled}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -935,10 +939,18 @@ function extractJsxArtifacts(transcript: ChatTranscriptMessage[]): JsxArtifact[]
  */
 function stripJsxFences(text: string): { text: string; removed: number } {
   let removed = 0;
-  const cleaned = text.replace(/```(?:jsx|tsx|diagram)\s*\n[\s\S]*?```\s*/g, () => {
+  let cleaned = text.replace(/```(?:jsx|tsx|diagram)\s*\n[\s\S]*?```\s*/g, () => {
     removed += 1;
     return '';
   });
+  // Streaming case: an in-progress jsx fence has no closing ``` yet. Drop
+  // everything from the opening fence onward so the source doesn't flash in
+  // the chat bubble while the artifact is still being generated.
+  const openIdx = cleaned.search(/```(?:jsx|tsx|diagram)\b/);
+  if (openIdx !== -1) {
+    cleaned = cleaned.slice(0, openIdx);
+    removed += 1;
+  }
   return { text: cleaned.trim().length === 0 ? '' : cleaned, removed };
 }
 
@@ -1049,14 +1061,18 @@ function TranscriptEntry({
     );
   }
   if (entry.kind === 'partial_assistant') {
+    const stripped = entry.text ? stripJsxFences(entry.text) : { text: '', removed: 0 };
     return (
       <div className="flex justify-start gap-1.5">
         <ClaudeAvatar pulsing />
         <div className="min-w-0 max-w-[85%] rounded-xl rounded-tl-sm bg-white px-2.5 py-1.5 text-[11px] leading-snug text-slate-800 shadow-sm ring-1 ring-slate-200">
-          {entry.text ? (
-            <div className="whitespace-pre-wrap">{entry.text}</div>
+          {stripped.text ? (
+            <div className="whitespace-pre-wrap">{stripped.text}</div>
           ) : null}
-          {entry.thinking && !entry.text ? (
+          {stripped.removed > 0 && !stripped.text ? (
+            <div className="text-[10px] italic text-violet-600">Generating JSX artifact…</div>
+          ) : null}
+          {entry.thinking && !stripped.text && stripped.removed === 0 ? (
             <div className="whitespace-pre-wrap text-[10px] italic text-slate-400">
               {entry.thinking.slice(-200)}
             </div>
@@ -1067,7 +1083,16 @@ function TranscriptEntry({
     );
   }
   if (entry.kind === 'tool_call') {
-    return <ToolCallView name={entry.toolName} input={entry.toolInput} onJumpToArtifacts={onJumpToArtifacts} />;
+    // Only interactive tool calls render inline. Generic tool calls (Read,
+    // Bash, Edit, …) are hidden so the transcript isn't drowned by a massive
+    // list — the assistant's next message describes the outcome.
+    if (entry.toolName === 'AskUserQuestion') {
+      return <AskUserQuestionView input={entry.toolInput} />;
+    }
+    if (entry.toolName === 'ExitPlanMode') {
+      return <ExitPlanModeView input={entry.toolInput} onJumpToArtifacts={onJumpToArtifacts} />;
+    }
+    return null;
   }
   // Tool results are not rendered — they're noise. The assistant's next
   // message describes the outcome.
@@ -1075,52 +1100,6 @@ function TranscriptEntry({
     return null;
   }
   return null;
-}
-
-function ToolCallView({
-  name,
-  input,
-  onJumpToArtifacts
-}: {
-  name?: string;
-  input: unknown;
-  onJumpToArtifacts?: () => void;
-}) {
-  if (name === 'AskUserQuestion') {
-    return <AskUserQuestionView input={input} />;
-  }
-  if (name === 'ExitPlanMode') {
-    return <ExitPlanModeView input={input} onJumpToArtifacts={onJumpToArtifacts} />;
-  }
-  // All other tools collapse into a quiet one-liner; the JSON is available
-  // on click for the operator who wants to inspect it.
-  return (
-    <div className="flex justify-start gap-2">
-      <div className="w-5 shrink-0" />
-      <details className="max-w-[85%] rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[10px]">
-        <summary className="flex cursor-pointer items-center gap-1 text-slate-600">
-          <ToolIcon />
-          <span className="font-medium">{name ?? 'tool'}</span>
-          <span className="text-slate-400">·</span>
-          <span className="truncate text-slate-400">{summarizeToolInput(input)}</span>
-        </summary>
-        <pre className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap break-all rounded bg-white px-2 py-1 font-mono text-[10px] text-slate-700">
-          {JSON.stringify(input, null, 2)}
-        </pre>
-      </details>
-    </div>
-  );
-}
-
-function summarizeToolInput(input: unknown): string {
-  if (!input || typeof input !== 'object') return '';
-  const o = input as Record<string, unknown>;
-  // Common single-string fields that are worth showing inline.
-  for (const k of ['command', 'file_path', 'path', 'url', 'pattern', 'query']) {
-    const v = o[k];
-    if (typeof v === 'string') return v.length > 80 ? v.slice(0, 80) + '…' : v;
-  }
-  return '';
 }
 
 interface AskUserQuestionItem {
@@ -1236,10 +1215,3 @@ function ClaudeAvatar({ dim, pulsing }: { dim?: boolean; pulsing?: boolean } = {
   );
 }
 
-function ToolIcon() {
-  return (
-    <svg viewBox="0 0 20 20" className="h-3.5 w-3.5 text-slate-500" fill="currentColor">
-      <path d="M14.121 3.879a3 3 0 014.243 4.243l-1.06 1.06-4.243-4.242 1.06-1.061zM12 6l4.243 4.243-8.486 8.486H3.515v-4.243L12 6z" />
-    </svg>
-  );
-}
