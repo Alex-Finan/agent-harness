@@ -155,8 +155,12 @@ export function ChatSession({
   );
 
   async function send() {
+    if (!detail) return;
     const text = draft.trim();
-    if (!text || !detail) return;
+    // Queued side-panel comments can carry the turn on their own — allow an
+    // empty composer when at least one comment is pending.
+    const queuedComments = detail.comments.length;
+    if (!text && queuedComments === 0) return;
     // Clear the composer immediately so the operator can keep typing/queuing
     // the next message instead of waiting for the round-trip to finish.
     setDraft('');
@@ -352,6 +356,7 @@ export function ChatSession({
               sending={sending}
               disabled={detail.state.status === 'ended'}
               error={sendError}
+              queuedComments={detail.comments.length}
             />
           </>
         ) : (
@@ -599,7 +604,8 @@ function ChatComposer({
   onSend,
   sending,
   disabled,
-  error
+  error,
+  queuedComments
 }: {
   draft: string;
   setDraft: (s: string) => void;
@@ -607,6 +613,8 @@ function ChatComposer({
   sending: boolean;
   disabled: boolean;
   error: string | null;
+  /** Number of side-panel comments that will be attached to the next send. */
+  queuedComments: number;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Grow the composer with its content, between MIN_PX and MAX_PX. Past the
@@ -619,11 +627,17 @@ function ChatComposer({
     el.style.height = 'auto';
     el.style.height = Math.max(MIN_PX, Math.min(el.scrollHeight, MAX_PX)) + 'px';
   }, [draft]);
+  const canSend = draft.trim().length > 0 || queuedComments > 0;
   return (
     <div className="border-t border-slate-200 bg-white p-2">
       {error ? (
         <div className="mb-1 rounded border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] text-rose-700">
           {error}
+        </div>
+      ) : null}
+      {queuedComments > 0 ? (
+        <div className="mx-auto mb-1 max-w-3xl rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-center text-[10px] text-amber-800">
+          {queuedComments} comment{queuedComments === 1 ? '' : 's'} will attach to the next message
         </div>
       ) : null}
       <div className="mx-auto flex max-w-3xl flex-col gap-1">
@@ -632,21 +646,27 @@ function ChatComposer({
             ref={textareaRef}
             className="block w-full resize-none overflow-y-auto rounded-lg border-0 bg-transparent px-3 py-2 pr-20 text-[13px] leading-snug placeholder:text-slate-400 focus:outline-none focus:ring-0"
             style={{ height: 64 }}
-            placeholder={disabled ? 'Chat has ended.' : 'Message Claude…'}
+            placeholder={
+              disabled
+                ? 'Chat has ended.'
+                : queuedComments > 0
+                  ? 'Optional message (comments will be sent without it)…'
+                  : 'Message Claude…'
+            }
             value={draft}
             disabled={disabled}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
-                if (!disabled && !sending && draft.trim()) onSend();
+                if (!disabled && !sending && canSend) onSend();
               }
             }}
           />
           <button
             className="absolute bottom-1.5 right-1.5 inline-flex items-center gap-1 rounded-md bg-blue-600 px-2 py-1 text-[10px] font-medium text-white shadow-sm transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-slate-300"
             onClick={onSend}
-            disabled={disabled || sending || !draft.trim()}
+            disabled={disabled || sending || !canSend}
           >
             {sending ? 'Sending…' : 'Send ⌘↩'}
           </button>

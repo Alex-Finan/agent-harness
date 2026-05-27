@@ -263,20 +263,49 @@ export class ChatManager {
       throw new Error('a turn is already in flight; wait for the assistant to finish');
     }
 
-    // Apply pending seed (from /compact) once and clear it.
-    let effectiveText = text;
+    // Fold pending operator comments into the user turn — annotations become
+    // a visible prefix on the operator's bubble, so the conversation reads as
+    // a single message that combines side-panel feedback with any composer
+    // text. Snapshot their ids so we only clear what was actually sent
+    // (comments added during the assistant's response stay queued).
+    const pendingComments = await readChatComments(chatId);
+    const sentCommentIds = new Set(pendingComments.map((c) => c.id));
+    let textWithComments = text;
+    if (pendingComments.length > 0) {
+      const annotations = pendingComments
+        .map((c, i) => {
+          const quoted = c.anchor?.quoted_text ?? '';
+          const snippet = quoted.length > 200 ? `${quoted.slice(0, 200)}…` : quoted;
+          const ref = snippet ? `On "${snippet}"` : 'Annotation';
+          return `${i + 1}. ${ref}\n   ${c.body}`;
+        })
+        .join('\n\n');
+      const header =
+        pendingComments.length === 1
+          ? '[1 annotation from the side panel — please address]'
+          : `[${pendingComments.length} annotations from the side panel — please address]`;
+      textWithComments = text
+        ? `${header}\n\n${annotations}\n\n---\n\n${text}`
+        : `${header}\n\n${annotations}`;
+    }
+
+    // Apply pending seed (from /compact) once and clear it. Seed is hidden
+    // context — goes to the CLI but not into the visible transcript bubble.
+    let effectiveText = textWithComments;
     if (state.pending_seed) {
-      effectiveText = `${state.pending_seed}\n\n---\n\n${text}`;
+      effectiveText = `${state.pending_seed}\n\n---\n\n${textWithComments}`;
       session.state.pending_seed = undefined;
     }
 
     // Persist the user turn to the transcript immediately so the UI can render
     // it on the next watcher tick even before the assistant starts streaming.
+    // We log `textWithComments` (visible) rather than `effectiveText` so the
+    // /compact seed stays hidden but operator-visible annotations are preserved.
     const userMsg = {
       type: 'user',
       message: {
         role: 'user',
-        content: [{ type: 'text', text }]
+        content: [{ type: 'text', text: textWithComments }]
       },
       // Carry a synthetic id so the frontend can address user messages too.
       uuid: randomUUID(),
@@ -314,6 +343,18 @@ export class ChatManager {
       message: { role: 'user', content: [{ type: 'text', text: effectiveText }] }
     };
     session.child.stdin.write(JSON.stringify(wireTurn) + '\n');
+
+    // Comments are one-shot: once a turn has been sent with them folded in,
+    // drop them from the queue. Re-read the file so concurrent additions
+    // during the snapshot→write window survive.
+    if (sentCommentIds.size > 0) {
+      const current = await readChatComments(chatId);
+      const remaining = current.filter((c) => !sentCommentIds.has(c.id));
+      if (remaining.length !== current.length) {
+        await writeChatComments(chatId, remaining);
+        this.bus.publish({ type: 'chat_comments', chatId, comments: remaining });
+      }
+    }
 
     return turnPromise;
   }
