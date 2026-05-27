@@ -25,11 +25,55 @@ import { EventBus } from './events.js';
 import { HarnessWatcher } from './watcher.js';
 import { RunDispatcher } from './dispatch.js';
 import { listRepos } from './repos.js';
+import { ChatManager } from './chat.js';
+import {
+  readChatComments,
+  writeChatComments,
+  newChatCommentId,
+  type ChatComment
+} from '../state/chatComments.js';
+import { chatNotesPath } from '../state/paths.js';
+import { ChatPermissionModeEnum } from '../state/chatState.js';
 
 export interface BuildServerOptions {
   webDist?: string;
   logger?: boolean;
 }
+
+// -------------------- Chat-session request bodies --------------------
+
+const ChatCreateBody = z.object({
+  title: z.string().optional(),
+  cwd: z.string().min(1),
+  model: z.string().optional(),
+  permission_mode: ChatPermissionModeEnum.optional()
+});
+
+const ChatSendBody = z.object({
+  text: z.string().min(1)
+});
+
+const ChatNotesBody = z.object({
+  notesMd: z.string()
+});
+
+const ChatCommentAnchor = z.object({
+  start_line: z.number().int().nonnegative(),
+  start_col: z.number().int().nonnegative(),
+  end_line: z.number().int().nonnegative(),
+  end_col: z.number().int().nonnegative(),
+  quoted_text: z.string()
+});
+
+const ChatNewCommentBody = z.object({
+  message_id: z.string().min(1),
+  anchor: ChatCommentAnchor,
+  body: z.string().min(1)
+});
+
+const ChatPatchCommentBody = z.object({
+  body: z.string().min(1)
+});
 
 const InitBody = z.object({
   repo: z.string().min(1),
@@ -106,11 +150,13 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
   bus: EventBus;
   watcher: HarnessWatcher;
   dispatcher: RunDispatcher;
+  chat: ChatManager;
 }> {
   const app = Fastify({ logger: opts.logger ?? false });
   const bus = new EventBus();
   const watcher = new HarnessWatcher(bus);
   const dispatcher = new RunDispatcher(bus);
+  const chat = new ChatManager(bus);
 
   await watcher.start();
 
@@ -639,9 +685,189 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
     return listRepos({ force: refresh === '1' || refresh === 'true' });
   });
 
+  // -------------------- Chat sessions --------------------
+  // A "chat" is an interactive `claude` CLI subprocess owned by the harness,
+  // distinct from the planner/executor pipeline ("runs"). Each chat persists
+  // to ~/.agent-harness/chats/<chatId>/ with its own transcript, notes, and
+  // comments. Authentication uses the system `claude login` OAuth; we never
+  // pass an API key.
+
+  app.get('/api/chat', async () => {
+    const chats = await chat.listChats();
+    return { chats };
+  });
+
+  app.post('/api/chat', async (req, reply) => {
+    const parsed = ChatCreateBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid body', issues: parsed.error.issues };
+    }
+    try {
+      const state = await chat.createChat({
+        title: parsed.data.title,
+        cwd: parsed.data.cwd,
+        model: parsed.data.model,
+        permission_mode: parsed.data.permission_mode
+      });
+      return { chat: state };
+    } catch (e) {
+      reply.code(400);
+      return { error: (e as Error).message };
+    }
+  });
+
+  app.get('/api/chat/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const state = await chat.getChat(id);
+    if (!state) {
+      reply.code(404);
+      return { error: 'chat not found' };
+    }
+    const [transcript, comments, notesMd] = await Promise.all([
+      chat.readTranscript(id),
+      readChatComments(id),
+      readOrNull(chatNotesPath(id))
+    ]);
+    return { state, transcript, comments, notesMd: notesMd ?? '' };
+  });
+
+  app.post('/api/chat/:id/send', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const parsed = ChatSendBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid body', issues: parsed.error.issues };
+    }
+    try {
+      await chat.sendTurn(id, parsed.data.text);
+      return { ok: true };
+    } catch (e) {
+      reply.code(400);
+      return { error: (e as Error).message };
+    }
+  });
+
+  app.post('/api/chat/:id/stop', async (req) => {
+    const { id } = req.params as { id: string };
+    await chat.stopChat(id);
+    return { ok: true };
+  });
+
+  app.post('/api/chat/:id/clear', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      const state = await chat.clearChat(id);
+      return { ok: true, state };
+    } catch (e) {
+      reply.code(400);
+      return { error: (e as Error).message };
+    }
+  });
+
+  app.post('/api/chat/:id/compact', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      const result = await chat.compactChat(id);
+      return { ok: true, summary: result.summary };
+    } catch (e) {
+      reply.code(400);
+      return { error: (e as Error).message };
+    }
+  });
+
+  app.delete('/api/chat/:id', async (req) => {
+    const { id } = req.params as { id: string };
+    await chat.deleteChat(id);
+    return { ok: true };
+  });
+
+  // ---- Notes (free-form personal scratchpad, never sent to Claude) ----
+  app.get('/api/chat/:id/notes', async (req) => {
+    const { id } = req.params as { id: string };
+    const notesMd = (await readOrNull(chatNotesPath(id))) ?? '';
+    return { notesMd };
+  });
+
+  app.put('/api/chat/:id/notes', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const parsed = ChatNotesBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid body', issues: parsed.error.issues };
+    }
+    await writeAtomic(chatNotesPath(id), parsed.data.notesMd);
+    bus.publish({ type: 'chat_notes', chatId: id, notesMd: parsed.data.notesMd });
+    return { ok: true };
+  });
+
+  // ---- Persistent comments (annotations on assistant messages) ----
+  app.get('/api/chat/:id/comments', async (req) => {
+    const { id } = req.params as { id: string };
+    return { comments: await readChatComments(id) };
+  });
+
+  app.post('/api/chat/:id/comments', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const parsed = ChatNewCommentBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid body', issues: parsed.error.issues };
+    }
+    const existing = await readChatComments(id);
+    const comment: ChatComment = {
+      id: newChatCommentId(),
+      message_id: parsed.data.message_id,
+      anchor: parsed.data.anchor,
+      body: parsed.data.body,
+      created_at: new Date().toISOString()
+    };
+    const next = [...existing, comment];
+    await writeChatComments(id, next);
+    bus.publish({ type: 'chat_comments', chatId: id, comments: next });
+    return { comment };
+  });
+
+  app.patch('/api/chat/:id/comments/:cid', async (req, reply) => {
+    const { id, cid } = req.params as { id: string; cid: string };
+    const parsed = ChatPatchCommentBody.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid body', issues: parsed.error.issues };
+    }
+    const existing = await readChatComments(id);
+    const idx = existing.findIndex((c) => c.id === cid);
+    if (idx < 0) {
+      reply.code(404);
+      return { error: 'comment not found' };
+    }
+    const next = [...existing];
+    next[idx] = {
+      ...next[idx],
+      body: parsed.data.body,
+      updated_at: new Date().toISOString()
+    };
+    await writeChatComments(id, next);
+    bus.publish({ type: 'chat_comments', chatId: id, comments: next });
+    return { comment: next[idx] };
+  });
+
+  app.delete('/api/chat/:id/comments/:cid', async (req, reply) => {
+    const { id, cid } = req.params as { id: string; cid: string };
+    const existing = await readChatComments(id);
+    const next = existing.filter((c) => c.id !== cid);
+    if (next.length === existing.length) {
+      reply.code(404);
+      return { error: 'comment not found' };
+    }
+    await writeChatComments(id, next);
+    bus.publish({ type: 'chat_comments', chatId: id, comments: next });
+    return { ok: true };
+  });
+
   // -------------------- SSE --------------------
   app.get('/api/events', (req, reply) => {
-    const { run } = (req.query as { run?: string }) ?? {};
+    const { run, chat } = (req.query as { run?: string; chat?: string }) ?? {};
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
@@ -652,7 +878,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
     reply.raw.write(
       `data: ${JSON.stringify({ type: 'hello', serverVersion: VERSION })}\n\n`
     );
-    const unsubscribe = bus.subscribe(reply, run);
+    const unsubscribe = bus.subscribe(reply, { runId: run, chatId: chat });
     const heartbeat = setInterval(() => {
       try {
         reply.raw.write(`: heartbeat\n\n`);
@@ -713,7 +939,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
     });
   }
 
-  return { app, bus, watcher, dispatcher };
+  return { app, bus, watcher, dispatcher, chat };
 }
 
 function contentType(file: string): string {

@@ -139,6 +139,37 @@ body {
     @apply text-blue-700 underline-offset-2 hover:underline;
   }
 
+  /* Compact variant: used in chat bubbles where the prose should match the
+     surrounding bubble text size (11px) instead of the wider 14px default
+     that read-only run-detail panels use. */
+  .markdown-compact :where(p),
+  .markdown-compact :where(ul),
+  .markdown-compact :where(ol),
+  .markdown-compact :where(table) {
+    @apply text-[11px] leading-snug my-1.5;
+  }
+  .markdown-compact :where(h1) {
+    @apply text-sm mt-2 mb-1;
+  }
+  .markdown-compact :where(h2) {
+    @apply text-[13px] mt-2 mb-1;
+  }
+  .markdown-compact :where(h3) {
+    @apply text-[12px] mt-1.5 mb-1;
+  }
+  .markdown-compact :where(li) {
+    @apply my-0.5;
+  }
+  .markdown-compact :where(code) {
+    @apply text-[10px];
+  }
+  .markdown-compact :where(pre) {
+    @apply my-2 p-2 text-[10px];
+  }
+  .markdown-compact :where(blockquote) {
+    @apply my-2 pl-2 text-[11px];
+  }
+
   /* Mermaid HTML-labels render inside <foreignObject><div>…</div></foreignObject>.
      Long single-word identifiers like `CHARGEBACK_REASON_CODE` or
      `state.transactionPackets` have no spaces to wrap on, so mermaid's

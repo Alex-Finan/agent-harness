@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, openEventStream, type RunState, type ServerEvent } from './api';
+import { api, chatApi, openEventStream, type ChatState, type RunState, type ServerEvent } from './api';
 import { RunList } from './components/RunList';
 import { RunDetail } from './components/RunDetail';
 import { RunOverview } from './components/RunOverview';
 import { NewRunDialog } from './components/NewRunDialog';
+import { NewChatDialog } from './components/NewChatDialog';
+import { ChatSession } from './components/ChatSession';
 import { PromptsPanel } from './components/PromptsPanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts';
@@ -12,18 +14,22 @@ type Page = 'settings' | 'prompts';
 
 export function App() {
   const [runs, setRuns] = useState<RunState[]>([]);
+  const [chats, setChats] = useState<ChatState[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [selectedChat, setSelectedChat] = useState<string | null>(null);
   // `page` takes over the main area when set. Selecting a run clears it;
   // navigating to a page clears `selected`. Modeled as a single enum so only
   // one main view ever renders.
   const [page, setPage] = useState<Page | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const [showNewChat, setShowNewChat] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [meta, setMeta] = useState<{ version: string; harnessHome: string } | null>(null);
 
   useEffect(() => {
     void api.meta().then(setMeta).catch(() => {});
     void refresh();
+    void refreshChats();
     const es = openEventStream((event: ServerEvent) => {
       if (event.type === 'hello') return;
       if (
@@ -33,6 +39,13 @@ export function App() {
         event.type === 'cost'
       ) {
         void refresh();
+      }
+      if (
+        event.type === 'chat_created' ||
+        event.type === 'chat_state' ||
+        event.type === 'chat_deleted'
+      ) {
+        void refreshChats();
       }
     });
     return () => es.close();
@@ -50,6 +63,15 @@ export function App() {
     }
   }
 
+  async function refreshChats() {
+    try {
+      const { chats } = await chatApi.list();
+      setChats(chats);
+    } catch {
+      /* ignore */
+    }
+  }
+
   useEffect(() => {
     // When the selected run disappears from the list (purged after abort,
     // etc.), drop back to the dashboard rather than snapping to runs[0] —
@@ -59,13 +81,27 @@ export function App() {
     }
   }, [runs, selected]);
 
+  useEffect(() => {
+    if (selectedChat && !chats.some((c) => c.chat_id === selectedChat)) {
+      setSelectedChat(null);
+    }
+  }, [chats, selectedChat]);
+
   function goToPage(p: Page) {
     setPage(p);
     setSelected(null);
+    setSelectedChat(null);
   }
 
   function selectRun(runId: string | null) {
     setSelected(runId);
+    setSelectedChat(null);
+    setPage(null);
+  }
+
+  function selectChat(chatId: string | null) {
+    setSelectedChat(chatId);
+    setSelected(null);
     setPage(null);
   }
 
@@ -101,13 +137,15 @@ export function App() {
         onEscape: () => {
           if (showHelp) setShowHelp(false);
           else if (showNew) setShowNew(false);
+          else if (showNewChat) setShowNewChat(false);
           else if (page) setPage(null);
+          else if (selectedChat) setSelectedChat(null);
           else setSelected(null);
         },
         onHelp: () => setShowHelp((x) => !x),
         onNew: () => setShowNew(true)
       }),
-      [moveSelection, showHelp, showNew, page]
+      [moveSelection, showHelp, showNew, showNewChat, page, selectedChat]
     )
   );
 
@@ -187,8 +225,19 @@ export function App() {
 
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-80 shrink-0 flex-col border-r border-slate-200 bg-white">
-          <div className="min-h-0 flex-1">
+          {/* Two-pane sidebar: Runs on top, Chats on bottom. Both scroll
+              independently; height split is 60/40 by default so the new Chats
+              section is always visible without scrolling past Runs. */}
+          <div className="flex min-h-0 flex-[3] flex-col border-b border-slate-200">
             <RunList runs={runs} selectedId={selected} onSelect={selectRun} onNew={() => setShowNew(true)} />
+          </div>
+          <div className="flex min-h-0 flex-[2] flex-col">
+            <ChatListSection
+              chats={chats}
+              selectedId={selectedChat}
+              onSelect={selectChat}
+              onNew={() => setShowNewChat(true)}
+            />
           </div>
           {meta ? (
             <div
@@ -208,6 +257,8 @@ export function App() {
             <PageShell title="System prompts">
               <PromptsPanel />
             </PageShell>
+          ) : selectedChat ? (
+            <ChatSession key={selectedChat} chatId={selectedChat} onBack={() => selectChat(null)} />
           ) : selected ? (
             <RunDetail key={selected} runId={selected} onSelectRun={selectRun} allRuns={runs} />
           ) : (
@@ -226,10 +277,88 @@ export function App() {
           }}
         />
       ) : null}
+      {showNewChat ? (
+        <NewChatDialog
+          onClose={() => setShowNewChat(false)}
+          onCreated={(chatId) => {
+            setShowNewChat(false);
+            selectChat(chatId);
+            void refreshChats();
+          }}
+        />
+      ) : null}
       {showHelp ? <ShortcutOverlay onClose={() => setShowHelp(false)} /> : null}
       <ShortcutHintFooter onShow={() => setShowHelp(true)} />
     </div>
   );
+}
+
+function ChatListSection({
+  chats,
+  selectedId,
+  onSelect,
+  onNew
+}: {
+  chats: ChatState[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onNew: () => void;
+}) {
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold uppercase tracking-wide text-blue-900">Chats</div>
+          <div className="text-[11px] text-slate-500">{chats.length} session{chats.length === 1 ? '' : 's'}</div>
+        </div>
+        <button className="btn btn-primary shrink-0" onClick={onNew} title="New chat session">
+          + Chat
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {chats.length === 0 ? (
+          <div className="px-4 py-6 text-sm text-slate-500">
+            No chats yet. Click <span className="font-medium">+ Chat</span> to wrap{' '}
+            <code className="font-mono">claude</code> interactively.
+          </div>
+        ) : (
+          <ul className="divide-y divide-slate-200/60">
+            {chats.map((c) => (
+              <li
+                key={c.chat_id}
+                className={`cursor-pointer px-4 py-2 text-xs hover:bg-slate-50 ${
+                  selectedId === c.chat_id ? 'bg-blue-50' : ''
+                }`}
+                onClick={() => onSelect(c.chat_id)}
+                title={c.cwd}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-medium text-slate-900">{c.title}</span>
+                  <ChatStatusDot status={c.status} />
+                </div>
+                <div className="mt-0.5 truncate text-[11px] text-slate-500">
+                  {c.turn_count} turn{c.turn_count === 1 ? '' : 's'} · ${c.cost_usd.toFixed(3)}
+                </div>
+                <div className="truncate text-[10px] font-mono text-slate-400">{c.cwd}</div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ChatStatusDot({ status }: { status: ChatState['status'] }) {
+  const color =
+    status === 'thinking'
+      ? 'bg-amber-500'
+      : status === 'error'
+        ? 'bg-rose-500'
+        : status === 'ended'
+          ? 'bg-slate-300'
+          : 'bg-emerald-500';
+  return <span className={`inline-block h-1.5 w-1.5 rounded-full ${color}`} title={status} />;
 }
 
 function PageShell({ title, children }: { title: string; children: React.ReactNode }) {

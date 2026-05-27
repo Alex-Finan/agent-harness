@@ -108,7 +108,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{
     });
   }
 
-  const { app, watcher, dispatcher } = await buildServer({ webDist, logger: false });
+  const { app, watcher, dispatcher, chat } = await buildServer({ webDist, logger: false });
   await app.listen({ port, host });
   void resumeAutoIterates(dispatcher);
   const url = `http://${host}:${port}`;
@@ -122,6 +122,7 @@ export async function serve(opts: ServeOptions = {}): Promise<{
   return {
     url,
     close: async () => {
+      await chat.shutdown();
       await app.close();
       await watcher.stop();
     }

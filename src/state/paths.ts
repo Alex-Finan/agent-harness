@@ -97,3 +97,39 @@ export function trialDir(runId: string, trialNum: number): string {
 export function trialResultPath(runId: string, trialNum: number): string {
   return path.join(trialDir(runId, trialNum), 'result.json');
 }
+
+// ---------------------------------------------------------------------------
+// Chat session paths — a chat is an interactive `claude` CLI conversation
+// owned by the harness, distinct from the planner/executor "runs" pipeline.
+// Each session lives in its own directory; comments and notes persist forever
+// (unlike pending_comments on runs which are short-lived).
+// ---------------------------------------------------------------------------
+
+export function chatsRoot(): string {
+  return path.join(harnessHome(), 'chats');
+}
+
+export function chatDir(chatId: string): string {
+  return path.join(chatsRoot(), chatId);
+}
+
+export function chatStatePath(chatId: string): string {
+  return path.join(chatDir(chatId), 'state.json');
+}
+
+export function chatTranscriptPath(chatId: string): string {
+  return path.join(chatDir(chatId), 'transcript.jsonl');
+}
+
+export function chatNotesPath(chatId: string): string {
+  return path.join(chatDir(chatId), 'notes.md');
+}
+
+export function chatCommentsPath(chatId: string): string {
+  return path.join(chatDir(chatId), 'comments.json');
+}
+
+/** Per-chat subprocess stderr log (appended across spawns for diagnostics). */
+export function chatSubprocessLogPath(chatId: string): string {
+  return path.join(chatDir(chatId), 'subprocess.log');
+}

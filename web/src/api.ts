@@ -353,10 +353,36 @@ export type ServerEvent =
       status: 'started' | 'finished' | 'error';
       error?: string;
     }
-  | { type: 'cost'; runId: string; perRole: Record<string, number>; total: number };
+  | { type: 'cost'; runId: string; perRole: Record<string, number>; total: number }
+  // -------------------- Chat events --------------------
+  | { type: 'chat_created'; chatId: string; state: ChatState }
+  | { type: 'chat_state'; chatId: string; state: ChatState }
+  | { type: 'chat_deleted'; chatId: string }
+  | { type: 'chat_message'; chatId: string; message: ChatTranscriptMessage }
+  | { type: 'chat_stream'; chatId: string; event: ChatStreamEvent }
+  | { type: 'chat_system'; chatId: string; event: ChatSystemEvent }
+  | { type: 'chat_result'; chatId: string; result: ChatResultEvent }
+  | { type: 'chat_notes'; chatId: string; notesMd: string }
+  | { type: 'chat_comments'; chatId: string; comments: ChatComment[] }
+  | { type: 'chat_reset'; chatId: string };
 
-export function openEventStream(onEvent: (event: ServerEvent) => void, filterRunId?: string): EventSource {
-  const url = filterRunId ? `/api/events?run=${encodeURIComponent(filterRunId)}` : '/api/events';
+export interface OpenEventStreamOptions {
+  runId?: string;
+  chatId?: string;
+}
+
+export function openEventStream(
+  onEvent: (event: ServerEvent) => void,
+  filter?: string | OpenEventStreamOptions
+): EventSource {
+  // Back-compat: a bare string is treated as runId (legacy call sites).
+  const opts: OpenEventStreamOptions =
+    typeof filter === 'string' ? { runId: filter } : filter ?? {};
+  const params = new URLSearchParams();
+  if (opts.runId) params.set('run', opts.runId);
+  if (opts.chatId) params.set('chat', opts.chatId);
+  const qs = params.toString();
+  const url = qs ? `/api/events?${qs}` : '/api/events';
   const es = new EventSource(url);
   es.onmessage = (msg) => {
     try {
@@ -368,3 +394,164 @@ export function openEventStream(onEvent: (event: ServerEvent) => void, filterRun
   };
   return es;
 }
+
+// ---------------------------------------------------------------------------
+// Chat session types and API
+// ---------------------------------------------------------------------------
+
+export type ChatStatus = 'idle' | 'thinking' | 'ended' | 'error';
+export type ChatPermissionMode =
+  | 'acceptEdits'
+  | 'auto'
+  | 'bypassPermissions'
+  | 'default'
+  | 'dontAsk'
+  | 'plan';
+
+export interface ChatState {
+  chat_id: string;
+  title: string;
+  cwd: string;
+  session_id: string;
+  model?: string;
+  permission_mode: ChatPermissionMode;
+  status: ChatStatus;
+  created_at: string;
+  updated_at: string;
+  last_error?: string;
+  cost_usd: number;
+  turn_count: number;
+}
+
+export interface ChatComment {
+  id: string;
+  message_id: string;
+  anchor: CommentAnchor;
+  body: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+// Transcript line shapes — the harness writes raw CLI messages plus a
+// synthetic user turn (with _harness_at) to the JSONL transcript.
+export interface ChatAssistantMessage {
+  type: 'assistant';
+  uuid?: string;
+  message: {
+    id?: string;
+    role: 'assistant';
+    content: Array<{
+      type: 'text' | 'thinking' | 'tool_use';
+      text?: string;
+      thinking?: string;
+      name?: string;
+      input?: unknown;
+    }>;
+  };
+  session_id?: string;
+  _harness_at?: string;
+}
+
+export interface ChatUserMessage {
+  type: 'user';
+  uuid?: string;
+  message: {
+    role: 'user';
+    content: Array<{ type: 'text' | 'tool_result'; text?: string; tool_use_id?: string; content?: unknown }>;
+  };
+  session_id?: string;
+  _harness_at?: string;
+}
+
+export interface ChatSystemEvent {
+  type: 'system';
+  subtype?: string;
+  [k: string]: unknown;
+}
+
+export interface ChatResultEvent {
+  type: 'result';
+  subtype: string;
+  is_error?: boolean;
+  total_cost_usd?: number;
+  num_turns?: number;
+  result?: string;
+  [k: string]: unknown;
+}
+
+export interface ChatStreamEvent {
+  type: 'stream_event';
+  event: {
+    type: string;
+    index?: number;
+    delta?: { type: string; text?: string; thinking?: string };
+    content_block?: { type: string };
+    message?: unknown;
+  };
+  session_id?: string;
+  uuid?: string;
+}
+
+export type ChatTranscriptMessage =
+  | ChatAssistantMessage
+  | ChatUserMessage
+  | ChatSystemEvent
+  | ChatResultEvent
+  | ChatStreamEvent;
+
+export interface ChatDetail {
+  state: ChatState;
+  transcript: ChatTranscriptMessage[];
+  comments: ChatComment[];
+  notesMd: string;
+}
+
+export const chatApi = {
+  list: () => http<{ chats: ChatState[] }>('/api/chat'),
+  get: (id: string) => http<ChatDetail>(`/api/chat/${id}`),
+  create: (body: {
+    title?: string;
+    cwd: string;
+    model?: string;
+    permission_mode?: ChatPermissionMode;
+  }) =>
+    http<{ chat: ChatState }>('/api/chat', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    }),
+  send: (id: string, text: string) =>
+    http<{ ok: boolean }>(`/api/chat/${id}/send`, {
+      method: 'POST',
+      body: JSON.stringify({ text })
+    }),
+  stop: (id: string) => http<{ ok: boolean }>(`/api/chat/${id}/stop`, { method: 'POST' }),
+  remove: (id: string) => http<{ ok: boolean }>(`/api/chat/${id}`, { method: 'DELETE' }),
+  clear: (id: string) =>
+    http<{ ok: boolean; state: ChatState }>(`/api/chat/${id}/clear`, { method: 'POST' }),
+  compact: (id: string) =>
+    http<{ ok: boolean; summary: string }>(`/api/chat/${id}/compact`, { method: 'POST' }),
+
+  getNotes: (id: string) => http<{ notesMd: string }>(`/api/chat/${id}/notes`),
+  saveNotes: (id: string, notesMd: string) =>
+    http<{ ok: boolean }>(`/api/chat/${id}/notes`, {
+      method: 'PUT',
+      body: JSON.stringify({ notesMd })
+    }),
+
+  listComments: (id: string) => http<{ comments: ChatComment[] }>(`/api/chat/${id}/comments`),
+  addComment: (
+    id: string,
+    body: { message_id: string; anchor: CommentAnchor; body: string }
+  ) =>
+    http<{ comment: ChatComment }>(`/api/chat/${id}/comments`, {
+      method: 'POST',
+      body: JSON.stringify(body)
+    }),
+  patchComment: (id: string, cid: string, body: string) =>
+    http<{ comment: ChatComment }>(`/api/chat/${id}/comments/${cid}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ body })
+    }),
+  deleteComment: (id: string, cid: string) =>
+    http<{ ok: boolean }>(`/api/chat/${id}/comments/${cid}`, { method: 'DELETE' })
+};
