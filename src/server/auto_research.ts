@@ -15,7 +15,8 @@ export interface AutoResearchConfig {
   runId: string;
   experimentDir: string;
   objective: string;
-  evaluationCmd: string;
+  /** Optional. When absent, the agent bootstraps its own evaluation method on trial 1. */
+  evaluationCmd?: string;
   maxTrials: number;
   budgetMinutesPerTrial?: number;
 }
@@ -36,7 +37,7 @@ export function buildResearchPrompt(args: {
   runId: string;
   experimentDir: string;
   objective: string;
-  evaluationCmd: string;
+  evaluationCmd?: string;
   trialNum: number;
   bestMetric: number | null;
   notesContent: string;
@@ -58,6 +59,42 @@ export function buildResearchPrompt(args: {
     'Your task is to make changes that improve the metric defined by the objective, then measure and report it.',
   ].join('\n');
 
+  const hasEvalCmd = !!args.evaluationCmd?.trim();
+
+  const evalSection: string[] = hasEvalCmd
+    ? [
+        '## Evaluation',
+        `Measure the metric by running this exact command — do not substitute your own: \`${args.evaluationCmd}\``,
+      ]
+    : [
+        '## Evaluation (you define it)',
+        'No evaluation command was provided — you are responsible for establishing how the objective is measured.',
+        args.bestMetric !== null
+          ? 'A prior trial already established the evaluation method. Read `notes.md` and reuse the SAME measurement procedure exactly — do not invent a new one, or scores will not be comparable.'
+          : 'This is the first trial. Design a single, reproducible way to measure the objective and FREEZE it: ' +
+            'write a re-runnable script (e.g. `run_experiment.sh`) or record the precise, deterministic steps in `notes.md`. ' +
+            'Every future trial must reuse this identical procedure, so make it self-contained and unambiguous.',
+        'If you create or settle on a re-runnable evaluation command, declare it once on its own line in EXACTLY this format so the harness can anchor future trials to it:',
+        '   EVAL_CMD|<command>',
+        '   For example: EVAL_CMD|bash run_experiment.sh',
+      ];
+
+  const instructions: string[] = [
+    '## Instructions',
+    '1. Read the objective carefully and understand what metric you are optimising.',
+    `2. Explore the entire repository freely — you may read and modify any files in ${args.experimentDir}. ` +
+      'There are no restrictions on which files you may edit.',
+    '3. Decide on what change(s) to make to try to improve the metric.',
+    '4. Implement those changes across any files you deem necessary.',
+    hasEvalCmd
+      ? '5. Measure by running the evaluation command shown above.'
+      : '5. Measure using the evaluation method from the Evaluation section (reuse the frozen procedure if one exists).',
+    '6. Append a brief note to `notes.md` (in the experiment directory) summarising what you tried, why, and — on the first trial — exactly how the metric is measured so later trials can reproduce it.',
+    '7. At the very end of your response, output the measured metric on its own line in EXACTLY this format:',
+    '   RESULT|M=<value>',
+    '   For example: RESULT|M=0.9234',
+  ];
+
   const promptLines = [
     `# Auto-Research Trial ${args.trialNum}`,
     '',
@@ -75,21 +112,14 @@ export function buildResearchPrompt(args: {
     '## Prior Research Notes',
     args.notesContent.trim() || '(No notes from prior trials yet.)',
     '',
-    '## Instructions',
-    '1. Read the objective carefully and understand what metric you are optimising.',
-    `2. Explore the entire repository freely — you may read and modify any files in ${args.experimentDir}. ` +
-      'There are no restrictions on which files you may edit.',
-    '3. Decide on what change(s) to make to try to improve the metric.',
-    '4. Implement those changes across any files you deem necessary.',
-    `5. Run the evaluation command: \`${args.evaluationCmd}\``,
-    '6. Append a brief note to `notes.md` (in the experiment directory) summarising what you tried and why.',
-    '7. At the very end of your response, output the measured metric on its own line in EXACTLY this format:',
-    '   RESULT|M=<value>',
-    '   For example: RESULT|M=0.9234',
+    ...evalSection,
+    '',
+    ...instructions,
     '',
     'Notes:',
     '- You have full access to all files in the repository; freely explore and modify anything.',
-    '- The evaluation command may also print the metric as `RESULT|M=<value>` or `METRIC=<value>` in its output.',
+    '- The metric M is maximised: bigger is always better. If the objective is to minimise something, report its negative or reciprocal.',
+    '- Any evaluation command may also print the metric as `RESULT|M=<value>` or `METRIC=<value>` in its output.',
     '- Always report the metric on its own line at the end of your final response.',
   ];
 
@@ -140,6 +170,25 @@ export function parseMetricFromOutput(sessionOutput: string): number | null {
 }
 
 /**
+ * Parse a self-declared evaluation command from session output. Finds the last
+ * line matching `EVAL_CMD|<command>` and returns the trimmed command string.
+ * Returns null if no match is found. Used to anchor later trials to the
+ * evaluation method an agent bootstraps when no command was supplied up front.
+ */
+export function parseEvalCmdFromOutput(sessionOutput: string): string | null {
+  const lines = sessionOutput.split('\n');
+  let lastMatch: string | null = null;
+  for (const line of lines) {
+    const m = line.trim().match(/^EVAL_CMD\|(.+)$/);
+    if (m) {
+      const cmd = m[1].trim();
+      if (cmd) lastMatch = cmd;
+    }
+  }
+  return lastMatch;
+}
+
+/**
  * Apply keep logic: commit all changes in the experiment directory.
  */
 async function gitKeep(experimentDir: string, message: string): Promise<void> {
@@ -181,8 +230,10 @@ export async function runAutoResearchSweep(
   config: AutoResearchConfig,
   bus: EventBus
 ): Promise<void> {
-  const { runId, experimentDir, objective, evaluationCmd, maxTrials, budgetMinutesPerTrial } =
-    config;
+  const { runId, experimentDir, objective, maxTrials, budgetMinutesPerTrial } = config;
+  // May start undefined (agent-defined evaluation) and get anchored once the
+  // agent declares an EVAL_CMD on an early trial.
+  let evaluationCmd = config.evaluationCmd;
 
   // Load initial state to pick up trials_completed and best_metric from any
   // prior partial run.
@@ -258,6 +309,21 @@ export async function runAutoResearchSweep(
     // d. Parse metric from output.
     const rawOutput = sessionResult.resultText ?? '';
     const metric = parseMetricFromOutput(rawOutput);
+
+    // d2. If no evaluation command was supplied, anchor future trials to the
+    // one the agent bootstrapped and declared via EVAL_CMD.
+    if (!evaluationCmd?.trim()) {
+      const declared = parseEvalCmdFromOutput(rawOutput);
+      if (declared) {
+        evaluationCmd = declared;
+        run = await loadRun(runId);
+        await saveState({
+          ...run.state,
+          evaluation_cmd: declared,
+          updated_at: new Date().toISOString(),
+        });
+      }
+    }
 
     // e. Apply keep or discard via git.
     let status: TrialResult['status'];

@@ -162,7 +162,7 @@ export class RunDispatcher {
 
       const experimentDir = state.experiment_dir ?? state.target_repo;
       const objective = state.objective ?? '';
-      const evaluationCmd = state.evaluation_cmd ?? 'bash run_experiment.sh';
+      const evaluationCmd = state.evaluation_cmd;
       const maxTrials = state.max_trials ?? 10;
       const budgetMinutesPerTrial = state.budget_minutes_per_trial;
 

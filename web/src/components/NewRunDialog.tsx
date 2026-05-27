@@ -24,7 +24,7 @@ export function NewRunDialog({
   // Auto-research fields
   const [experimentDir, setExperimentDir] = useState('');
   const [objective, setObjective] = useState('');
-  const [evaluationCmd, setEvaluationCmd] = useState('bash run_experiment.sh');
+  const [evaluationCmd, setEvaluationCmd] = useState('');
   const [maxTrials, setMaxTrials] = useState(50);
   const [budgetMinutes, setBudgetMinutes] = useState(10);
 
@@ -43,7 +43,7 @@ export function NewRunDialog({
           runType: 'auto_research',
           experimentDir,
           objective,
-          evaluationCmd,
+          evaluationCmd: evaluationCmd.trim() || undefined,
           maxTrials,
           budgetMinutesPerTrial: budgetMinutes
         });
@@ -172,18 +172,11 @@ export function NewRunDialog({
           ) : (
             <>
               <div>
-                <label className="label">Experiment directory (absolute path)</label>
-                <input
-                  className="input"
-                  value={experimentDir}
-                  onChange={(e) => setExperimentDir(e.target.value)}
-                  placeholder="/path/to/experiment/repo"
-                  required
-                  disabled={busy}
-                />
+                <label className="label">Experiment directory</label>
+                <RepoPicker value={experimentDir} onChange={setExperimentDir} disabled={busy} />
                 <div className="mt-1 text-[11px] text-slate-500">
-                  Absolute path to the repository where experiments will run. Claude has full
-                  read/write access to all files here.
+                  Pick from your GitHub repos + local clones, or paste an absolute path directly.
+                  Claude has full read/write access to all files in the selected repo.
                 </div>
               </div>
               <div>
@@ -201,17 +194,18 @@ export function NewRunDialog({
                 </div>
               </div>
               <div>
-                <label className="label">Evaluation command</label>
+                <label className="label">Evaluation command (optional)</label>
                 <input
                   className="input"
                   value={evaluationCmd}
                   onChange={(e) => setEvaluationCmd(e.target.value)}
-                  placeholder="bash run_experiment.sh"
-                  required
+                  placeholder="bash run_experiment.sh — or leave blank to let the agent define it"
                   disabled={busy}
                 />
                 <div className="mt-1 text-[11px] text-slate-500">
                   Command that prints <code className="font-mono">RESULT|M=&lt;value&gt;</code> somewhere in its output.
+                  Leave blank and the agent will design its own reproducible metric on trial 1, freeze it,
+                  and reuse it for every later trial.
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
