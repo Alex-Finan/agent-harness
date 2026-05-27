@@ -142,6 +142,26 @@ export class ChatManager {
     return readChatState(chatId);
   }
 
+  /**
+   * Called once at server start. Any chat whose on-disk status is 'thinking'
+   * was left mid-turn by a previous process — the subprocess is gone, so
+   * the result event will never arrive and the UI's spinner would spin
+   * forever. Reset to 'idle' and stamp last_error so the operator knows
+   * the previous response was truncated. Safe to call on every boot.
+   */
+  async reconcileOnStartup(): Promise<void> {
+    const chats = await this.listChats();
+    for (const state of chats) {
+      if (state.status !== 'thinking') continue;
+      state.status = 'idle';
+      state.updated_at = new Date().toISOString();
+      state.last_error =
+        'subprocess was orphaned by a previous server restart; the last assistant turn may be truncated. Send again to continue.';
+      await writeChatState(state);
+      this.bus.publish({ type: 'chat_state', chatId: state.chat_id, state });
+    }
+  }
+
   async createChat(input: ChatCreateInput): Promise<ChatState> {
     if (!input.cwd || !existsSync(input.cwd)) {
       throw new Error(`cwd does not exist: ${input.cwd}`);

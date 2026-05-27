@@ -171,6 +171,11 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<{
   const dispatcher = new RunDispatcher(bus);
   const chat = new ChatManager(bus);
 
+  // Reconcile any chats left in a non-terminal state by a previous server
+  // process — once we restart, no live subprocess can exist for them, so
+  // 'thinking' is a lie that hangs the UI's spinner forever.
+  await chat.reconcileOnStartup();
+
   await watcher.start();
 
   // -------------------- Meta --------------------
